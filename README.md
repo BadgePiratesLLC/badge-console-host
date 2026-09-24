@@ -60,24 +60,43 @@ a $45 device. See `docs/DECISIONS.md` before re-proposing it.
 Built and tested end-to-end against a simulated badge (see
 `test/server-e2e.test.mjs`) and against the real free/keyless APIs
 (weather, sports, this machine's OpenClaw log — see
-`test/plugins-live.test.mjs`). **Not yet verified**:
+`test/plugins-live.test.mjs`).
 
-- Against a real, physical CC13 badge running the card-schema firmware.
+**Verified since the last status update, via real GitHub Actions runners
+(this repo's dev sandbox is macOS-only and can't exercise the others
+itself):**
+
+- The OS keychain paths — `ci.yml`'s 3-OS matrix passes on real
+  ubuntu-latest / windows-latest / macos-latest runners, including the
+  Windows DPAPI path (two real bugs found and fixed there — see
+  `docs/DECISIONS.md`).
+- The single-executable build (`scripts/build-sea.mjs`) on an official
+  Node.js build — `release.yml`'s 3-runner matrix now builds a working
+  SEA binary on macOS, Linux, *and* Windows (one real bug found and fixed:
+  Windows' `npx` isn't directly spawnable without `shell: true`).
+- The release actually gets published: `release.yml` now has a
+  `publish-release` job (it didn't before) that attaches all three binaries
+  to a real GitHub Release under the exact names `install.sh` / `install.ps1`
+  expect. Proven with a real `v0.1.0` tag push.
+
+**Not yet verified:**
+
+- **The repo is private.** `raw.githubusercontent.com` and
+  `releases/.../download/...` both 404 for an unauthenticated request
+  against a private repo — confirmed live. Every URL in this README's
+  "install" section is unreachable by an actual buyer until this repo is
+  made public. This is the current #1 blocker on the whole packaging
+  phase; making it public is Kevin's call, not this session's.
+- Against a real, physical CC13 badge running the card-schema firmware
+  (firmware side isn't currently building on GAMINGCRAP — separate
+  blocker, see Nexus 7c9c1a15).
 - Anthropic/OpenAI plugins against a real Admin API key (request shape
   follows each provider's documented Usage/Costs API; untested live).
-- The OS keychain paths on Windows (DPAPI) and Linux (`secret-tool`) —
-  code-complete against each platform's documented CLI, untested on real
-  Windows/Linux hardware (this repo's dev environment is macOS-only, and
-  even macOS Keychain writes failed in *this* sandboxed dev session for
-  lack of a GUI-unlocked session — see `docs/DECISIONS.md`).
-- The single-executable build (`scripts/build-sea.mjs`) on an official
-  Node.js build — only exercised (partially, and unsuccessfully) against
-  a Homebrew Node build that ships with SEA support compiled out. First
-  real verification should be `.github/workflows/release.yml`'s own run.
 - mDNS badge discovery — the client is real and packet-tested
   (`test/mdns.test.mjs`), but inert until the badge firmware advertises a
   service (it doesn't yet; typed-IP pairing is the path that works today).
-- No installer has been run on a genuinely fresh machine end-to-end.
+- No installer has been run on a genuinely fresh machine end-to-end (and
+  can't be, publicly, until the repo is public).
 
 None of that is hidden inside the code — every gap above has a matching
 note in `docs/DECISIONS.md` at the point it matters.
