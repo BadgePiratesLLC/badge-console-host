@@ -15,6 +15,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
@@ -38,3 +39,33 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.bin }}
+
+  # install.sh / install.ps1 both fetch from releases/<repo>/latest/download/<asset> —
+  # a URL that only resolves once a GitHub Release exists with matching asset
+  # names attached. Without this job, every build here was a CI artifact only
+  # (auth-required, no stable URL) and the one-line installers had nothing to
+  # download — confirmed missing on this workflow's first-ever run (no tags,
+  # no releases existed until this was added). Gated to real tag pushes so a
+  # manual workflow_dispatch (used to smoke-test the build matrix) never cuts
+  # a release by accident.
+  publish-release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage release assets under the names install.sh / install.ps1 expect
+        run: |
+          mkdir -p release
+          cp artifacts/badge-console-host-macos/badge-console-host release/badge-console-host-macos
+          cp artifacts/badge-console-host-linux/badge-console-host release/badge-console-host-linux
+          cp artifacts/badge-console-host-windows/badge-console-host.exe release/badge-console-host-windows.exe
+          chmod +x release/badge-console-host-macos release/badge-console-host-linux
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

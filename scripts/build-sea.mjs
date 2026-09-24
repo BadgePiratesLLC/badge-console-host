@@ -51,10 +51,17 @@ console.log('4/4 injecting the blob…');
 // run via `npx` rather than added to package.json dependencies — this
 // keeps the zero-dependency policy intact for the actual shipped product
 // (postject never ships inside the resulting binary or the repo).
+//
+// On Windows, `npx` on PATH is `npx.cmd`, not a directly-spawnable
+// executable — execFileSync without `shell: true` fails with
+// `spawnSync npx ENOENT` even though `npx` works fine when typed into a
+// real shell. Confirmed on a real windows-latest GitHub Actions runner
+// (release.yml run 36066666928) — the first time this workflow was ever
+// run, since no release has shipped yet.
 execFileSync('npx', ['--yes', 'postject', outPath, 'NODE_SEA_BLOB', path.join(DIST, 'sea-prep.blob'),
   '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2',
   ...(process.platform === 'darwin' ? ['--macho-segment-name', 'NODE_SEA'] : [])],
-  { stdio: 'inherit' });
+  { stdio: 'inherit', shell: process.platform === 'win32' });
 
 if (process.platform === 'darwin') {
   try { execFileSync('codesign', ['--sign', '-', outPath]); } catch { /* ad-hoc signing best-effort */ }
