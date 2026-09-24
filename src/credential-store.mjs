@@ -173,6 +173,8 @@ async function winSet(service, account, value) {
   const p = secretFilePath(service, account);
   const b64 = Buffer.from(value, 'utf8').toString('base64');
   const script = [
+    '$ErrorActionPreference = "Stop"',
+    'Import-Module Microsoft.PowerShell.Security -Force',
     `$plain = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("${b64}"))`,
     '$secure = ConvertTo-SecureString -String $plain -AsPlainText -Force',
     '$enc = ConvertFrom-SecureString -SecureString $secure',
@@ -193,6 +195,8 @@ async function winGet(service, account) {
   const p = secretFilePath(service, account);
   if (!fs.existsSync(p)) return null;
   const script = [
+    '$ErrorActionPreference = "Stop"',
+    'Import-Module Microsoft.PowerShell.Security -Force',
     `$enc = Get-Content -Path "${p.replace(/\\/g, '\\\\')}" -Raw`,
     '$secure = ConvertTo-SecureString -String $enc',
     '$bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)',
