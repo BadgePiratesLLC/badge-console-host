@@ -1,0 +1,24 @@
+name: ci
+
+# Runs the real test suite (node --test) on Linux, macOS and Windows on
+# every push/PR. This is the first place several of this repo's "not yet
+# verified" gaps (docs/DECISIONS.md) get real cross-platform signal —
+# in particular the credential-store file-fallback path, which this
+# sandbox could only prove on macOS.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test
