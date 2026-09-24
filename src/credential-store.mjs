@@ -142,37 +142,43 @@ async function linuxDelete(service, account) {
 // Windows user account, unreadable by copying the file to another machine
 // or account.
 //
-// The secret is passed to PowerShell via an environment variable set only
-// on this one child process, not stdin. (An earlier stdin-based version,
-// reading via `[Console]::In.ReadToEnd()`, round-tripped an empty string
-// on a real Windows CI runner — stdin redirected through Node's
-// execFile is not guaranteed to reach `[Console]::In` the way a directly
-// piped terminal would. Env vars set on a specific child process avoid
-// that whole class of problem and aren't visible in `ps`/Task Manager's
-// command-line column the way an argv value would be.) ---
+// The secret is embedded directly in the generated script as base64, not
+// handed off via stdin or an env var. Both of those were tried first and
+// both round-tripped an empty string on a real (non-sandboxed) Windows CI
+// runner: stdin via `[Console]::In.ReadToEnd()` doesn't reliably reach the
+// child process the way a directly piped terminal would, and — found the
+// hard way, after switching to it specifically to dodge the stdin bug — a
+// value handed off via `execFile`'s per-call `env` option showed the exact
+// same empty-string symptom, so it isn't reliably reaching `$env:` inside
+// the child either. Embedding as base64 needs no IPC channel at all: the
+// value never has to cross a boundary Node and PowerShell disagree about.
+// Base64 also sidesteps quoting entirely (output alphabet is [A-Za-z0-9+/=]
+// only), so an arbitrary secret containing quotes/backticks/`$` can't break
+// out of the script text the way interpolating it directly would.
 
 function psScriptPath() {
   return path.join(os.tmpdir(), `bch-dpapi-${process.pid}-${Date.now()}.ps1`);
 }
 
-function runPowerShell(script, envExtra = {}) {
+function runPowerShell(script) {
   const scriptPath = psScriptPath();
   fs.writeFileSync(scriptPath, script, 'utf8');
   return execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-File', scriptPath], {
     timeout: BACKEND_TIMEOUT_MS,
-    env: { ...process.env, ...envExtra },
   }).finally(() => { try { fs.unlinkSync(scriptPath); } catch { /* best effort */ } });
 }
 
 async function winSet(service, account, value) {
   fs.mkdirSync(SECRETS_DIR, { recursive: true });
   const p = secretFilePath(service, account);
+  const b64 = Buffer.from(value, 'utf8').toString('base64');
   const script = [
-    '$secure = ConvertTo-SecureString -String $env:BCH_SECRET_VALUE -AsPlainText -Force',
+    `$plain = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("${b64}"))`,
+    '$secure = ConvertTo-SecureString -String $plain -AsPlainText -Force',
     '$enc = ConvertFrom-SecureString -SecureString $secure',
     `Set-Content -Path "${p.replace(/\\/g, '\\\\')}" -Value $enc -NoNewline`,
   ].join('\n');
-  await runPowerShell(script, { BCH_SECRET_VALUE: value });
+  await runPowerShell(script);
   return { backend: 'keychain' };
 }
 
