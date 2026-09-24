@@ -12,8 +12,15 @@
 // briefly visible to other local users via `ps`. This mirrors how `security`
 // and `secret-tool` are used in most shell tooling; a buyer who needs a
 // stronger guarantee should use the file backend's permissions (0600,
-// owner-only) as the honest baseline instead. Windows avoids this because
-// the DPAPI path pipes the value over stdin.
+// owner-only) as the honest baseline instead.
+//
+// Every OS-tool invocation below has a hard timeout (BACKEND_TIMEOUT_MS).
+// Found the hard way, not guessed: on a real (non-sandboxed) macOS CI
+// runner, `security add-generic-password` hung indefinitely instead of
+// erroring — it was waiting on a keychain-access confirmation dialog that
+// can never appear in a headless session. Without a timeout, that hang
+// defeats the entire point of the catch-and-fall-back-to-file design
+// below: the code never reaches the catch. See docs/DECISIONS.md.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +30,7 @@ import { promisify } from 'node:util';
 import { SECRETS_DIR } from './paths.mjs';
 
 const execFileAsync = promisify(execFile);
+const BACKEND_TIMEOUT_MS = 8000;
 
 function fileSlug(service, account) {
   return `${service}__${account}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -59,7 +67,7 @@ async function fileDelete(service, account) {
 async function macSet(service, account, value) {
   await execFileAsync('security', [
     'add-generic-password', '-a', account, '-s', service, '-w', value, '-U',
-  ]);
+  ], { timeout: BACKEND_TIMEOUT_MS });
   return { backend: 'keychain' };
 }
 
@@ -67,7 +75,7 @@ async function macGet(service, account) {
   try {
     const { stdout } = await execFileAsync('security', [
       'find-generic-password', '-a', account, '-s', service, '-w',
-    ]);
+    ], { timeout: BACKEND_TIMEOUT_MS });
     return stdout.replace(/\n$/, '');
   } catch {
     return null;
@@ -76,7 +84,7 @@ async function macGet(service, account) {
 
 async function macDelete(service, account) {
   try {
-    await execFileAsync('security', ['delete-generic-password', '-a', account, '-s', service]);
+    await execFileAsync('security', ['delete-generic-password', '-a', account, '-s', service], { timeout: BACKEND_TIMEOUT_MS });
   } catch { /* already gone */ }
 }
 
@@ -86,7 +94,7 @@ let _secretToolAvailable;
 async function hasSecretTool() {
   if (_secretToolAvailable !== undefined) return _secretToolAvailable;
   try {
-    await execFileAsync('which', ['secret-tool']);
+    await execFileAsync('which', ['secret-tool'], { timeout: BACKEND_TIMEOUT_MS });
     _secretToolAvailable = true;
   } catch {
     _secretToolAvailable = false;
@@ -94,9 +102,9 @@ async function hasSecretTool() {
   return _secretToolAvailable;
 }
 
-function execFileWithStdin(cmd, args, input) {
+function execFileWithStdin(cmd, args, input, { timeout = BACKEND_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
-    const child = execFile(cmd, args, (err, stdout) => {
+    const child = execFile(cmd, args, { timeout }, (err, stdout) => {
       if (err) reject(err); else resolve(stdout);
     });
     child.stdin.write(input);
@@ -114,7 +122,7 @@ async function linuxSet(service, account, value) {
 
 async function linuxGet(service, account) {
   try {
-    const { stdout } = await execFileAsync('secret-tool', ['lookup', 'service', service, 'account', account]);
+    const { stdout } = await execFileAsync('secret-tool', ['lookup', 'service', service, 'account', account], { timeout: BACKEND_TIMEOUT_MS });
     return stdout.replace(/\n$/, '') || null;
   } catch {
     return null;
@@ -123,7 +131,7 @@ async function linuxGet(service, account) {
 
 async function linuxDelete(service, account) {
   try {
-    await execFileAsync('secret-tool', ['clear', 'service', service, 'account', account]);
+    await execFileAsync('secret-tool', ['clear', 'service', service, 'account', account], { timeout: BACKEND_TIMEOUT_MS });
   } catch { /* already gone */ }
 }
 
@@ -132,28 +140,39 @@ async function linuxDelete(service, account) {
 // Manager (cmdkey has no programmatic read path for a stored password) but
 // gives the same property that matters here: at rest, encrypted to this
 // Windows user account, unreadable by copying the file to another machine
-// or account. ---
+// or account.
+//
+// The secret is passed to PowerShell via an environment variable set only
+// on this one child process, not stdin. (An earlier stdin-based version,
+// reading via `[Console]::In.ReadToEnd()`, round-tripped an empty string
+// on a real Windows CI runner — stdin redirected through Node's
+// execFile is not guaranteed to reach `[Console]::In` the way a directly
+// piped terminal would. Env vars set on a specific child process avoid
+// that whole class of problem and aren't visible in `ps`/Task Manager's
+// command-line column the way an argv value would be.) ---
 
 function psScriptPath() {
-  return path.join(os.tmpdir(), `bch-dpapi-${process.pid}.ps1`);
+  return path.join(os.tmpdir(), `bch-dpapi-${process.pid}-${Date.now()}.ps1`);
+}
+
+function runPowerShell(script, envExtra = {}) {
+  const scriptPath = psScriptPath();
+  fs.writeFileSync(scriptPath, script, 'utf8');
+  return execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-File', scriptPath], {
+    timeout: BACKEND_TIMEOUT_MS,
+    env: { ...process.env, ...envExtra },
+  }).finally(() => { try { fs.unlinkSync(scriptPath); } catch { /* best effort */ } });
 }
 
 async function winSet(service, account, value) {
   fs.mkdirSync(SECRETS_DIR, { recursive: true });
   const p = secretFilePath(service, account);
   const script = [
-    '$input = [Console]::In.ReadToEnd()',
-    '$secure = ConvertTo-SecureString -String $input -AsPlainText -Force',
+    '$secure = ConvertTo-SecureString -String $env:BCH_SECRET_VALUE -AsPlainText -Force',
     '$enc = ConvertFrom-SecureString -SecureString $secure',
     `Set-Content -Path "${p.replace(/\\/g, '\\\\')}" -Value $enc -NoNewline`,
   ].join('\n');
-  const scriptPath = psScriptPath();
-  fs.writeFileSync(scriptPath, script, 'utf8');
-  try {
-    await execFileWithStdin('powershell', ['-NoProfile', '-NonInteractive', '-File', scriptPath], value);
-  } finally {
-    fs.unlinkSync(scriptPath);
-  }
+  await runPowerShell(script, { BCH_SECRET_VALUE: value });
   return { backend: 'keychain' };
 }
 
@@ -166,15 +185,11 @@ async function winGet(service, account) {
     '$bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)',
     '[System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)',
   ].join('\n');
-  const scriptPath = psScriptPath();
-  fs.writeFileSync(scriptPath, script, 'utf8');
   try {
-    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-File', scriptPath]);
+    const { stdout } = await runPowerShell(script);
     return stdout.replace(/\r?\n$/, '') || null;
   } catch {
     return null;
-  } finally {
-    fs.unlinkSync(scriptPath);
   }
 }
 

@@ -11,9 +11,10 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setScratchHome } from './_helpers.mjs';
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bch-e2e-test-'));
-process.env.HOME = scratch;
+setScratchHome(scratch);
 
 // Seed a real-shaped OpenClaw invocation log so the openclaw plugin's real
 // (not mocked) code path has something to read, the same way it would on

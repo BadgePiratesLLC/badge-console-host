@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setScratchHome } from './_helpers.mjs';
 
 const { poll: pollWeather } = await import('../src/plugins/weather.mjs');
 const { poll: pollSports } = await import('../src/plugins/sports.mjs');
@@ -47,8 +48,7 @@ test('sports plugin surfaces an error (not a zero) for a bogus team', { timeout:
 
 test('openclaw plugin reads a real-shaped local invocation log', async () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bch-openclaw-test-'));
-  const realHome = process.env.HOME;
-  process.env.HOME = scratch;
+  const restoreHome = setScratchHome(scratch);
   try {
     const stateDir = path.join(scratch, '.openclaw', 'state');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -56,26 +56,25 @@ test('openclaw plugin reads a real-shaped local invocation log', async () => {
       path.join(stateDir, 'nexus_invocations.jsonl'),
       `${JSON.stringify({ ts: new Date().toISOString(), host: 'ci-runner', pid: 1, script: 'test', calls: 5 })}\n`,
     );
-    // Re-imported after HOME changes so the plugin's homedir()-derived
-    // LOG_PATH constant picks up the scratch dir.
+    // Re-imported after the home dir changes so the plugin's
+    // homedir()-derived LOG_PATH constant picks up the scratch dir.
     const { poll: pollOpenClaw } = await import(`../src/plugins/openclaw.mjs?t=${Date.now()}`);
     const result = await pollOpenClaw({ settings: {}, getSecret: async () => null });
     assert.equal(result.cards.length, 2);
     assert.equal(result.cards[0].id, 'openclaw-activity');
     assert.equal(result.cards[0].value, 1);
   } finally {
-    process.env.HOME = realHome;
+    restoreHome();
   }
 });
 
 test('openclaw plugin errors (not a zero) when no log exists', async () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bch-openclaw-empty-test-'));
-  const realHome = process.env.HOME;
-  process.env.HOME = scratch;
+  const restoreHome = setScratchHome(scratch);
   try {
     const { poll: pollOpenClaw } = await import(`../src/plugins/openclaw.mjs?t=${Date.now()}`);
     await assert.rejects(() => pollOpenClaw({ settings: {}, getSecret: async () => null }), /No OpenClaw local invocation log/);
   } finally {
-    process.env.HOME = realHome;
+    restoreHome();
   }
 });

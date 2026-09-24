@@ -74,6 +74,46 @@ repo's own end-to-end test (`test/server-e2e.test.mjs`) exercises.
 close this gap — small, additive (`ESPmDNS.h` + `MDNS.begin()` next to
 the existing `WebServer` setup), but out of scope for a host-agent commit.
 
+## Real CI findings that changed this repo (2026-09-24)
+
+The first `ci.yml` run against real macOS/Windows/Linux GitHub-hosted
+runners (not this dev sandbox) surfaced two real bugs, both fixed the same
+day:
+
+1. **No timeout on any OS-keychain subprocess.** On the real macOS
+   runner, `security add-generic-password` hung indefinitely — it was
+   waiting on a keychain-access confirmation dialog that can never appear
+   in a headless CI session, and the job had to be force-cancelled after
+   ~90s with an orphaned `security` process still running. This defeated
+   the entire "fall back to file on any keychain failure" design, because
+   a hang never reaches the `catch`. Fix: every `execFile`/PowerShell call
+   in `credential-store.mjs` now has an 8s timeout
+   (`BACKEND_TIMEOUT_MS`), so a stuck OS prompt degrades to the file
+   backend within 8 seconds instead of hanging the whole host agent.
+2. **Windows DPAPI round-trip returned an empty string.** The original
+   implementation piped the secret value to PowerShell over stdin,
+   decoded inside the script via `[Console]::In.ReadToEnd()`. On a real
+   Windows runner this reliably read back `''`, not the value —
+   Node's execFile-redirected stdin doesn't reach `[Console]::In` the way
+   a real piped terminal does. Fixed by passing the value through an
+   environment variable scoped to that one child process
+   (`$env:BCH_SECRET_VALUE`) instead, which also avoids putting the
+   secret in argv.
+
+The lesson generalized into how this repo's tests use "point HOME at a
+scratch dir" as an isolation technique: `os.homedir()` reads `$HOME` on
+POSIX but `%USERPROFILE%` on Windows, so a HOME-only override silently
+no-ops on the windows-latest runner and every test relying on it sees the
+runner's *real* profile instead of the intended scratch one. Tests now go
+through `test/_helpers.mjs`'s `setScratchHome()`, which sets both.
+
+**Takeaway for anyone picking this repo back up:** this sandbox's own dev
+environment (macOS, no GUI keychain session, only one Node build) could
+not have caught either bug — they only showed up on `ci.yml`'s real
+runners. Treat local "it passed" here as necessary, not sufficient; watch
+the GitHub Actions run for anything platform-specific in this repo before
+trusting a change is done.
+
 ## Windows credential storage isn't literally Credential Manager
 
 `cmdkey` (Windows Credential Manager's CLI) can *store* a generic

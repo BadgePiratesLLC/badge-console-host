@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setScratchHome } from './_helpers.mjs';
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bch-runtime-test-'));
-process.env.HOME = scratch;
+setScratchHome(scratch);
 
 const { PluginRuntime } = await import('../src/plugin-runtime.mjs');
 const { updateConfig, resetConfigCacheForTests } = await import('../src/config-store.mjs');
