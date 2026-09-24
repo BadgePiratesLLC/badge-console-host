@@ -1,0 +1,40 @@
+name: release
+
+# Builds a single-file executable per OS on a real runner for that OS —
+# this is how a Windows/Linux binary gets produced at all, since the dev
+# environment this repo was first built in is macOS-only. See
+# docs/DECISIONS.md "Single-executable packaging" for what has and hasn't
+# been verified.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: badge-console-host-macos
+            bin: badge-console-host
+          - os: ubuntu-latest
+            artifact: badge-console-host-linux
+            bin: badge-console-host
+          - os: windows-latest
+            artifact: badge-console-host-windows
+            bin: badge-console-host.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/build-sea.mjs
+      - run: node --test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.bin }}

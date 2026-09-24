@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Badge Console Host</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Badge Console Host</h1>
+  <p class="tagline">Running locally at 127.0.0.1. Nothing here leaves this machine except each feed's own request to its own provider, and cards to your badge.</p>
+</header>
+
+<section id="badge-section">
+  <h2>1. Badge</h2>
+  <div id="badge-status" class="status-line">checking…</div>
+  <div class="row">
+    <label>Badge IP <input id="badge-host" type="text" placeholder="192.168.1.42"></label>
+    <label>Port <input id="badge-port" type="number" value="80" style="width:5em"></label>
+    <label>Token <input id="badge-token" type="text" placeholder="from the badge's Wi-Fi setup portal"></label>
+    <button id="pair-btn">Pair</button>
+    <button id="discover-btn">Find on network (mDNS)</button>
+  </div>
+  <div id="pair-result" class="result"></div>
+</section>
+
+<section id="feeds-section">
+  <h2>2–4. Feeds — on/off, interval, credentials, and status</h2>
+  <div id="feeds-list">loading…</div>
+</section>
+
+<footer>
+  <p>Not X/Twitter — API access starts near $200/month, which doesn't fit a $45 device. See the repo's docs/DECISIONS.md.</p>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

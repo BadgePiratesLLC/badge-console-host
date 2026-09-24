@@ -1,0 +1,21 @@
+{
+  "name": "badge-console-host",
+  "version": "0.1.0",
+  "description": "Host agent for BadgePirates desk console badges: polls feed plugins, serves a local config page on 127.0.0.1, and pushes generic cards to the badge over LAN.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "bin": {
+    "badge-console-host": "./src/server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test",
+    "build:sea": "node scripts/build-sea.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
