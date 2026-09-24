@@ -168,11 +168,29 @@ function runPowerShell(script) {
   }).finally(() => { try { fs.unlinkSync(scriptPath); } catch { /* best effort */ } });
 }
 
+// Every script below starts with $ErrorActionPreference = "Stop" and an
+// explicit `Import-Module Microsoft.PowerShell.Security -Force`. Found via
+// a debug run with stdout/stderr captured on a real windows-latest CI
+// runner: ConvertTo-SecureString/ConvertFrom-SecureString failed to
+// autoload their module there ("CouldNotAutoloadMatchingModule"), and
+// because a PowerShell cmdlet-not-found error is non-terminating by
+// default, the script *kept running* with $secure/$enc left unset —
+// Set-Content wrote an empty string, execFile saw exit code 0, and the
+// empty value round-tripped cleanly with no exception anywhere to catch.
+// Explicitly importing the module sidesteps whatever broke autoload on
+// that runner; ErrorActionPreference=Stop is the actual fix for the class
+// of bug — any other cmdlet failure now aborts the script (non-zero exit)
+// instead of silently continuing, so setSecret/getSecret's existing
+// catch-and-fall-back-to-file path actually engages instead of a failure
+// being mistaken for a successful empty-string round trip.
+
 async function winSet(service, account, value) {
   fs.mkdirSync(SECRETS_DIR, { recursive: true });
   const p = secretFilePath(service, account);
   const b64 = Buffer.from(value, 'utf8').toString('base64');
   const script = [
+    '$ErrorActionPreference = "Stop"',
+    'Import-Module Microsoft.PowerShell.Security -Force',
     `$plain = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("${b64}"))`,
     '$secure = ConvertTo-SecureString -String $plain -AsPlainText -Force',
     '$enc = ConvertFrom-SecureString -SecureString $secure',
@@ -186,6 +204,8 @@ async function winGet(service, account) {
   const p = secretFilePath(service, account);
   if (!fs.existsSync(p)) return null;
   const script = [
+    '$ErrorActionPreference = "Stop"',
+    'Import-Module Microsoft.PowerShell.Security -Force',
     `$enc = Get-Content -Path "${p.replace(/\\/g, '\\\\')}" -Raw`,
     '$secure = ConvertTo-SecureString -String $enc',
     '$bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)',
