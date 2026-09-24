@@ -16,6 +16,7 @@
 import { getSecret } from './credential-store.mjs';
 import { pushCards } from './badge-client.mjs';
 import { loadConfig, getFeedConfig } from './config-store.mjs';
+import { log } from './logger.mjs';
 
 const SERVICE = 'badge-console-host';
 
@@ -74,12 +75,14 @@ export class PluginRuntime {
       clearTimeout(timeoutHandle);
       const status = this.status.get(plugin.id);
       status.lastError = { message: e.message, at: Date.now() };
+      log.error(`[${plugin.id}] poll failed: ${e.message}`);
       return { ok: false, error: e.message };
     }
     clearTimeout(timeoutHandle);
     if (!result || !Array.isArray(result.cards)) {
       const status = this.status.get(plugin.id);
       status.lastError = { message: 'Plugin returned no cards array (contract violation).', at: Date.now() };
+      log.error(`[${plugin.id}] contract violation: poll() resolved without a cards array.`);
       return { ok: false, error: 'Plugin returned no cards array.' };
     }
     if (cfg.badge.host) {
@@ -88,6 +91,7 @@ export class PluginRuntime {
       } catch (e) {
         const status = this.status.get(plugin.id);
         status.lastError = { message: `Got cards but push to badge failed: ${e.message}`, at: Date.now() };
+        log.error(`[${plugin.id}] push to badge failed: ${e.message}`);
         return { ok: false, error: e.message };
       }
     }
@@ -95,6 +99,7 @@ export class PluginRuntime {
     status.lastSuccess = Date.now();
     status.lastError = null;
     status.cardCount = result.cards.length;
+    log.info(`[${plugin.id}] pushed ${result.cards.length} card(s).`);
     return { ok: true, cards: result.cards };
   }
 

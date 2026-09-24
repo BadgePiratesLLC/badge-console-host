@@ -13,6 +13,7 @@ import { setSecret, deleteSecret, hasSecret } from './credential-store.mjs';
 import { testPairing, setBadgeToken } from './badge-client.mjs';
 import { browse as mdnsBrowse } from './mdns.mjs';
 import { PluginRuntime } from './plugin-runtime.mjs';
+import { log } from './logger.mjs';
 
 import * as openclaw from './plugins/openclaw.mjs';
 import * as anthropic from './plugins/anthropic.mjs';
@@ -140,12 +141,16 @@ async function handleApi(req, res, pathname) {
     const { host, port, token } = body;
     if (!host || !token) return sendJson(res, 400, { error: 'host and token are required' });
     const test = await testPairing(host, port || 80, token);
-    if (!test.ok) return sendJson(res, 502, { ok: false, error: test.reason });
+    if (!test.ok) {
+      log.error(`Pairing with ${host}:${port || 80} failed: ${test.reason}`);
+      return sendJson(res, 502, { ok: false, error: test.reason });
+    }
     await setBadgeToken(token);
     updateConfig((cfg) => {
       cfg.badge = { host, port: port || 80, paired: true };
     });
     runtime.reschedule();
+    log.info(`Paired with badge at ${host}:${port || 80}.`);
     return sendJson(res, 200, { ok: true });
   }
 
@@ -159,6 +164,7 @@ const server = http.createServer(async (req, res) => {
       const handled = await handleApi(req, res, url.pathname);
       if (handled === null) sendJson(res, 404, { error: 'not found' });
     } catch (e) {
+      log.error(`Unhandled error on ${req.method} ${url.pathname}: ${e.stack || e.message}`);
       sendJson(res, 500, { error: e.message });
     }
     return;
@@ -173,7 +179,7 @@ export function start(port = Number(process.env.BADGE_CONSOLE_HOST_PORT || 4173)
   return new Promise((resolve) => {
     server.listen(port, '127.0.0.1', () => {
       runtime.start();
-      console.log(`badge-console-host: config page at http://127.0.0.1:${port}`);
+      log.info(`badge-console-host: config page at http://127.0.0.1:${port}`);
       resolve(server);
     });
   });
@@ -188,8 +194,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (process.argv.includes('--install-autostart')) {
     const { installAutostart } = await import('./autostart.mjs');
     installAutostart()
-      .then((r) => console.log(`Autostart installed via ${r.method} (${r.path}).`))
-      .catch((e) => { console.error(`Autostart install failed: ${e.message}`); process.exitCode = 1; });
+      .then((r) => log.info(`Autostart installed via ${r.method} (${r.path}).`))
+      .catch((e) => { log.error(`Autostart install failed: ${e.message}`); process.exitCode = 1; });
   } else {
     start();
   }
