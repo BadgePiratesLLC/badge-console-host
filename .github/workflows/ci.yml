@@ -22,3 +22,5 @@ jobs:
         with:
           node-version: '22'
       - run: node --test
+        env:
+          BCH_DEBUG: '1'

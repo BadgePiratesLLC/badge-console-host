@@ -178,7 +178,14 @@ async function winSet(service, account, value) {
     '$enc = ConvertFrom-SecureString -SecureString $secure',
     `Set-Content -Path "${p.replace(/\\/g, '\\\\')}" -Value $enc -NoNewline`,
   ].join('\n');
-  await runPowerShell(script);
+  if (process.env.BCH_DEBUG) console.error('[BCH_DEBUG winSet] script:\n' + script);
+  const r = await runPowerShell(script);
+  if (process.env.BCH_DEBUG) {
+    console.error('[BCH_DEBUG winSet] stdout:', JSON.stringify(r.stdout));
+    console.error('[BCH_DEBUG winSet] stderr:', JSON.stringify(r.stderr));
+    console.error('[BCH_DEBUG winSet] file exists:', fs.existsSync(p));
+    if (fs.existsSync(p)) console.error('[BCH_DEBUG winSet] file content:', JSON.stringify(fs.readFileSync(p, 'utf8')));
+  }
   return { backend: 'keychain' };
 }
 
@@ -191,10 +198,16 @@ async function winGet(service, account) {
     '$bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)',
     '[System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)',
   ].join('\n');
+  if (process.env.BCH_DEBUG) console.error('[BCH_DEBUG winGet] script:\n' + script);
   try {
-    const { stdout } = await runPowerShell(script);
+    const { stdout, stderr } = await runPowerShell(script);
+    if (process.env.BCH_DEBUG) {
+      console.error('[BCH_DEBUG winGet] stdout:', JSON.stringify(stdout));
+      console.error('[BCH_DEBUG winGet] stderr:', JSON.stringify(stderr));
+    }
     return stdout.replace(/\r?\n$/, '') || null;
-  } catch {
+  } catch (e) {
+    if (process.env.BCH_DEBUG) console.error('[BCH_DEBUG winGet] threw:', e);
     return null;
   }
 }
