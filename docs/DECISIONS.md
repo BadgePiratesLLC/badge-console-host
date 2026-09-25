@@ -157,3 +157,25 @@ tools (neither documents a stdin-based write path) and is called out here
 rather than glossed over. The file-fallback path does not have this
 problem (value goes straight to `fs.writeFileSync`), and the Windows path
 avoids it by piping over stdin to PowerShell.
+
+## Anthropic/OpenAI plugins: mocked contract tests, not a live key
+
+Nexus d46f4521 asked for these two plugins to satisfy the Phase 0 contract:
+throw a clear error on a bad key or provider outage, never emit a blank
+card or a fabricated zero. Both `anthropic.mjs` and `openai.mjs` already
+existed with that behavior written in, but had zero test coverage — a
+comment in `test/plugins-live.test.mjs` claimed they were "contract-tested
+via plugin-runtime.test.mjs's fakes," which was never true (that file only
+ever runs synthetic `fakePlugin()` objects, not these two modules). Fixed
+by adding `test/plugins-anthropic-openai.test.mjs`, which mocks
+`global.fetch` to prove: no stored key → throws before any network call;
+401/403 → throws a "rejected the key" message; other non-2xx → throws with
+the status; a `fetch` rejection (DNS/network failure) propagates instead of
+being swallowed; and a successful two-endpoint response sums correctly into
+the two expected cards. Also corrected the misleading comment. **What this
+still doesn't prove**: whether Anthropic's/OpenAI's real Usage/Costs API
+response JSON actually matches the shape `usage.data[].results[]` /
+`cost.data[].results[].amount.value` this code assumes — no Admin API key
+for either provider was available in this dev environment to check that.
+If a real key becomes available, that's the next thing to run against it,
+not the error-handling contract (which is now proven).

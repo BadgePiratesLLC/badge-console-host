@@ -78,6 +78,14 @@ itself):**
   `publish-release` job (it didn't before) that attaches all three binaries
   to a real GitHub Release under the exact names `install.sh` / `install.ps1`
   expect. Proven with a real `v0.1.0` tag push.
+- The Anthropic and OpenAI plugins' error contract (Nexus d46f4521) — a
+  missing key, a rejected key, a provider HTTP error, and a raw network
+  failure each throw a clear message and never fall through to a card, via
+  mocked-`fetch` tests in `test/plugins-anthropic-openai.test.mjs`, plus a
+  real `PluginRuntime.runOnce()` check that a missing credential turns into
+  `status.lastError` and not a pushed card. What that mocking can't prove is
+  whether Anthropic's/OpenAI's actual response JSON matches the shape this
+  code assumes — see below.
 
 **Not yet verified:**
 
@@ -90,8 +98,12 @@ itself):**
 - Against a real, physical CC13 badge running the card-schema firmware
   (firmware side isn't currently building on GAMINGCRAP — separate
   blocker, see Nexus 7c9c1a15).
-- Anthropic/OpenAI plugins against a real Admin API key (request shape
-  follows each provider's documented Usage/Costs API; untested live).
+- Anthropic/OpenAI plugins against a real Admin API key. The error-handling
+  contract is now mocked-fetch tested (see above), but the request/response
+  *shape* still just follows each provider's documented Usage/Costs API and
+  has never round-tripped against a live account — if either provider's
+  actual JSON differs from the docs, the success path could misparse
+  without necessarily throwing.
 - mDNS badge discovery — the client is real and packet-tested
   (`test/mdns.test.mjs`), but inert until the badge firmware advertises a
   service (it doesn't yet; typed-IP pairing is the path that works today).

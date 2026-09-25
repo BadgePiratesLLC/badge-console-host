@@ -1,10 +1,12 @@
 // Live network tests against real, free, keyless endpoints (NWS weather,
 // ESPN scores) plus a real-shaped OpenClaw log — the three plugins in this
 // repo that need no credential and so can be proven for real rather than
-// mocked. The credentialed plugins (anthropic, openai, stocks) are
-// contract-tested via plugin-runtime.test.mjs's fakes instead; verifying
-// them for real needs a paid/free-tier key this dev environment doesn't
-// have (see each plugin's file header).
+// mocked. Anthropic and OpenAI are mocked-fetch contract-tested instead, in
+// plugins-anthropic-openai.test.mjs (plugin-runtime.test.mjs never touches
+// these two modules — it only exercises synthetic fakePlugin() objects);
+// stocks has no dedicated test yet (Phase 4). Verifying anthropic/openai
+// against a real Admin API key needs a paid key this dev environment
+// doesn't have (see each plugin's file header) and remains untested live.
 //
 // The openclaw test seeds its own log under a scratch HOME rather than
 // reading whatever machine happens to run this suite — a CI runner has no
