@@ -86,6 +86,13 @@ itself):**
   `status.lastError` and not a pushed card. What that mocking can't prove is
   whether Anthropic's/OpenAI's actual response JSON matches the shape this
   code assumes — see below.
+- The stocks plugin's error contract (Nexus c7aa8e00) — no key, a rejected
+  key (401), the free-tier rate limit (429), a provider HTTP error, and an
+  unknown-symbol response each throw a clear message instead of a zero,
+  via mocked-`fetch` tests in `test/plugins-stocks.test.mjs`. The other
+  three v1 feeds this same ticket covers — OpenClaw, Sports, Weather — were
+  already live-tested (see `test/plugins-live.test.mjs`) before this
+  status update; stocks was the one plugin still missing test coverage.
 
 **Not yet verified:**
 

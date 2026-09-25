@@ -11,7 +11,8 @@
 // are "contract-tested via plugin-runtime.test.mjs's fakes" — that file only
 // ever exercises synthetic fakePlugin() objects, never these two modules, so
 // that claim was never true. This file is what actually closes that gap for
-// anthropic and openai (stocks is Phase 4's plugin, out of scope here).
+// anthropic and openai; stocks gets the same treatment in
+// plugins-stocks.test.mjs (Nexus c7aa8e00).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

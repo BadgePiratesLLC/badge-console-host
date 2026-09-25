@@ -4,7 +4,8 @@
 // mocked. Anthropic and OpenAI are mocked-fetch contract-tested instead, in
 // plugins-anthropic-openai.test.mjs (plugin-runtime.test.mjs never touches
 // these two modules — it only exercises synthetic fakePlugin() objects);
-// stocks has no dedicated test yet (Phase 4). Verifying anthropic/openai
+// stocks is mocked-fetch contract-tested the same way, in
+// plugins-stocks.test.mjs (Nexus c7aa8e00). Verifying anthropic/openai
 // against a real Admin API key needs a paid key this dev environment
 // doesn't have (see each plugin's file header) and remains untested live.
 //
