@@ -130,3 +130,31 @@ test('a wrong badge token fails pairing cleanly and never gets stored', async (t
   const body = await res.json();
   assert.match(body.error, /rejected the token/);
 });
+
+test('display order is a real, persisted per-feed setting — this is what the config page\'s up/down buttons drive', async (t) => {
+  const hostPort = 41733;
+  await start(hostPort);
+  t.after(() => stop());
+  const base = `http://127.0.0.1:${hostPort}`;
+
+  // All feeds start at order 0 (config-store default) — assign distinct
+  // values the way app.js's moveFeed() does after a swap: renumber every
+  // feed 0..n-1 in the new order.
+  const state = await fetch(`${base}/api/state`).then((r) => r.json());
+  const ids = state.feeds.map((f) => f.id);
+  const reordered = [ids[1], ids[0], ...ids.slice(2)]; // swap first two
+  await Promise.all(reordered.map((id, i) => fetch(`${base}/api/feeds/${id}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order: i }),
+  })));
+
+  const state2 = await fetch(`${base}/api/state`).then((r) => r.json());
+  const byId = Object.fromEntries(state2.feeds.map((f) => [f.id, f.config.order]));
+  assert.equal(byId[reordered[0]], 0);
+  assert.equal(byId[reordered[1]], 1);
+  // Sorting by the persisted order (what app.js's renderFeeds does)
+  // reproduces the swapped order, not the original plugin registration order.
+  const sorted = [...state2.feeds].sort((a, b) => a.config.order - b.config.order).map((f) => f.id);
+  assert.deepEqual(sorted, reordered);
+});

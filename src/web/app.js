@@ -47,9 +47,26 @@ function renderFeeds(feeds) {
   const container = document.getElementById('feeds-list');
   container.innerHTML = '';
   feeds.sort((a, b) => (a.config.order || 0) - (b.config.order || 0));
-  for (const feed of feeds) {
-    container.appendChild(renderFeed(feed));
-  }
+  feeds.forEach((feed, i) => {
+    container.appendChild(renderFeed(feed, feeds, i));
+  });
+}
+
+// Display order only has meaning relative to the other feeds, so a move
+// re-numbers every feed in the sorted list (0..n-1) rather than asking the
+// buyer to juggle raw integers.
+async function moveFeed(sortedFeeds, id, direction) {
+  const idx = sortedFeeds.findIndex((f) => f.id === id);
+  const swapIdx = idx + direction;
+  if (swapIdx < 0 || swapIdx >= sortedFeeds.length) return;
+  const reordered = [...sortedFeeds];
+  [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+  await Promise.all(reordered.map((f, i) => api(`/api/feeds/${f.id}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order: i }),
+  })));
+  loadState();
 }
 
 function pillFor(feed) {
@@ -59,7 +76,7 @@ function pillFor(feed) {
   return { text: 'pending', cls: 'off' };
 }
 
-function renderFeed(feed) {
+function renderFeed(feed, sortedFeeds, index) {
   const div = document.createElement('div');
   div.className = 'feed';
   const pill = pillFor(feed);
@@ -67,6 +84,10 @@ function renderFeed(feed) {
   const head = document.createElement('div');
   head.className = 'feed-head';
   head.innerHTML = `
+    <div class="order-btns">
+      <button data-role="move-up" title="Move up in display order" ${index === 0 ? 'disabled' : ''}>&uarr;</button>
+      <button data-role="move-down" title="Move down in display order" ${index === sortedFeeds.length - 1 ? 'disabled' : ''}>&darr;</button>
+    </div>
     <div>
       <span class="feed-name">${feed.label}</span>
       <span class="pill ${pill.cls}">${pill.text}</span>
@@ -76,12 +97,20 @@ function renderFeed(feed) {
     </label>
   `;
   head.addEventListener('click', (e) => {
-    if (e.target.dataset.role === 'enabled') return;
+    if (e.target.dataset.role === 'enabled' || e.target.dataset.role === 'move-up' || e.target.dataset.role === 'move-down') return;
     div.classList.toggle('open');
   });
   head.querySelector('[data-role="enabled"]').addEventListener('change', async (e) => {
     await api(`/api/feeds/${feed.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: e.target.checked }) });
     loadState();
+  });
+  head.querySelector('[data-role="move-up"]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    moveFeed(sortedFeeds, feed.id, -1);
+  });
+  head.querySelector('[data-role="move-down"]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    moveFeed(sortedFeeds, feed.id, 1);
   });
 
   const desc = document.createElement('p');
