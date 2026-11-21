@@ -43,9 +43,14 @@ test('sports plugin returns a real team record card', { timeout: 15000 }, async 
 });
 
 test('sports plugin surfaces an error (not a zero) for a bogus team', { timeout: 15000 }, async () => {
+  // ESPN's bogus-team response shape has drifted over time: it has returned
+  // a 404/400 (caught explicitly) and, as of this test's last update, a 200
+  // with no `.team` field (caught by the generic "no team data" fallback).
+  // Either way the plugin contract — throw, never fall through to a zero
+  // card — holds; this regex covers both known response shapes.
   await assert.rejects(
     () => pollSports({ settings: { sport: 'football/nfl', team: 'ZZZZZ-not-a-team' }, getSecret: async () => null }),
-    /ESPN has no team/,
+    /ESPN has no team|ESPN response had no team data/,
   );
 });
 
