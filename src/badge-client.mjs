@@ -28,15 +28,21 @@ function badgeUrl(host, port, pathname) {
  * flow) decide what that means for their own status reporting; this
  * function's only job is the HTTP round trip.
  */
-export async function pushCards(host, port, cards, { timeoutMs = 5000 } = {}) {
+export async function pushCards(host, port, cards, { timeoutMs = 5000, actionPort } = {}) {
   const token = await getBadgeToken();
   if (!token) throw new Error('Badge is not paired yet — no auth token stored.');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers = { 'Content-Type': 'application/json', 'X-Auth-Token': token };
+    // Tells the badge where to call back on a button-card tap (see
+    // action-server.mjs). Omitted entirely if this host has no action
+    // server running — the badge just can't report taps, nothing else
+    // about the push changes.
+    if (actionPort) headers['X-Action-Port'] = String(actionPort);
     const res = await fetch(badgeUrl(host, port, '/cards'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': token },
+      headers,
       body: JSON.stringify(cards),
       signal: controller.signal,
     });

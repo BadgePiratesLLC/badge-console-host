@@ -23,6 +23,10 @@ export async function poll(ctx) {
 }
 ```
 
+A plugin may also export `async onAction(ctx, cardId)` if it pushes any
+`type: 'button'` cards (see **Button cards**, below) — same `ctx` shape
+as `poll()`.
+
 Then import and register it in `src/server.mjs`'s `PLUGINS` array.
 
 ## The one rule
@@ -70,3 +74,28 @@ Never read an API key from anywhere but `ctx.getSecret(account)`. Never
 log it, never put it in a card, never write it to `config-store.mjs`
 (that file is non-secret settings only). The buyer enters it once on the
 config page; storage/OS-keychain routing is handled for you.
+
+## Button cards (Nexus 7c9c1a15, scope addition 2026-11-21)
+
+Add `type: 'button'` to a card to make it tappable instead of passive on
+the badge (full wire contract in `docs/CardSchema.md` in the QACode_27
+firmware repo). When a buyer taps it, the badge POSTs the card's own
+`id` to this host's `/action` endpoint (see `action-server.mjs`) — the
+`PluginRuntime` looks up which plugin most recently pushed that id and
+calls that plugin's `onAction(ctx, cardId)`.
+
+```js
+export async function onAction(ctx, cardId) {
+  // ctx.settings / ctx.getSecret(account) — identical to poll()'s ctx.
+  // cardId — whatever your own poll() put in that button card's `id`.
+  // Throw to report a failure; there is no card to update on success,
+  // since a tap isn't new data the way a poll() result is.
+}
+```
+
+`homeassistant.mjs` is the reference implementation: it pushes a state
+card (reads one entity) and, if configured, a button card, and its
+`onAction()` calls the HA service the buyer configured
+(`light.toggle`, a scene, a script — whatever `domain.service` they put
+in `actionService`). The badge never talks to HA and never sees the HA
+token — it only ever reports "this id got tapped" back to this process.

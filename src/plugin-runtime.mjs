@@ -12,6 +12,13 @@
 // to the buyer. Throwing is how a plugin says "I have nothing new and here
 // is why"; the runtime never pushes on a throw and never invents a zero in
 // the plugin's place.
+//
+// A plugin may optionally export `async onAction(ctx, cardId)`, called
+// when the badge reports a tap on one of that plugin's `type: 'button'`
+// cards (see action-server.mjs — the badge calls back over the LAN, the
+// runtime routes by which plugin last pushed that card id). Same ctx
+// shape as poll(). Throwing here just logs; there is no card to update
+// since a button tap isn't itself new data.
 
 import { getSecret } from './credential-store.mjs';
 import { pushCards } from './badge-client.mjs';
@@ -21,10 +28,12 @@ import { log } from './logger.mjs';
 const SERVICE = 'badge-console-host';
 
 export class PluginRuntime {
-  constructor(plugins) {
+  constructor(plugins, { actionPort } = {}) {
     this.plugins = new Map(plugins.map((p) => [p.id, p]));
     this.status = new Map(); // feedId -> { lastSuccess, lastError, nextPollAt, cardCount }
     this.timers = new Map();
+    this.cardOwner = new Map(); // cardId -> pluginId, last plugin to push that id
+    this.actionPort = actionPort; // told to the badge on every push, see action-server.mjs
     for (const p of plugins) {
       this.status.set(p.id, { lastSuccess: null, lastError: null, nextPollAt: null, cardCount: 0 });
     }
@@ -87,7 +96,7 @@ export class PluginRuntime {
     }
     if (cfg.badge.host) {
       try {
-        await pushCards(cfg.badge.host, cfg.badge.port, result.cards);
+        await pushCards(cfg.badge.host, cfg.badge.port, result.cards, { actionPort: this.actionPort });
       } catch (e) {
         const status = this.status.get(plugin.id);
         status.lastError = { message: `Got cards but push to badge failed: ${e.message}`, at: Date.now() };
@@ -95,12 +104,40 @@ export class PluginRuntime {
         return { ok: false, error: e.message };
       }
     }
+    for (const card of result.cards) {
+      if (card && card.id) this.cardOwner.set(card.id, plugin.id);
+    }
+
     const status = this.status.get(plugin.id);
     status.lastSuccess = Date.now();
     status.lastError = null;
     status.cardCount = result.cards.length;
     log.info(`[${plugin.id}] pushed ${result.cards.length} card(s).`);
     return { ok: true, cards: result.cards };
+  }
+
+  /**
+   * Called by action-server.mjs when the badge reports a tap on a
+   * `type: 'button'` card. Routes to whichever plugin last pushed that
+   * card id and calls its onAction(ctx, cardId), if it defines one.
+   * Throws if the id is unknown or its owning plugin doesn't support
+   * actions — the caller (action-server.mjs) turns that into an HTTP
+   * error response.
+   */
+  async handleAction(cardId) {
+    const pluginId = this.cardOwner.get(cardId);
+    if (!pluginId) throw new Error(`No known card owner for id "${cardId}".`);
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin || typeof plugin.onAction !== 'function') {
+      throw new Error(`Plugin "${pluginId}" owns card "${cardId}" but has no onAction().`);
+    }
+    const feedCfg = getFeedConfig(pluginId, { intervalSeconds: plugin.defaultIntervalSeconds });
+    const ctx = {
+      settings: feedCfg.settings || {},
+      getSecret: (account) => getSecret(SERVICE, account),
+    };
+    await plugin.onAction(ctx, cardId);
+    log.info(`[${pluginId}] action "${cardId}" handled.`);
   }
 
   /** Start the recurring per-feed poll loop, one independent interval per enabled feed. */

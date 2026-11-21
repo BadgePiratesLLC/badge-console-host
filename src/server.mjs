@@ -13,6 +13,7 @@ import { setSecret, deleteSecret, hasSecret } from './credential-store.mjs';
 import { testPairing, setBadgeToken } from './badge-client.mjs';
 import { browse as mdnsBrowse } from './mdns.mjs';
 import { PluginRuntime } from './plugin-runtime.mjs';
+import { start as startActionServer } from './action-server.mjs';
 import { log } from './logger.mjs';
 
 import * as openclaw from './plugins/openclaw.mjs';
@@ -21,13 +22,17 @@ import * as openai from './plugins/openai.mjs';
 import * as stocks from './plugins/stocks.mjs';
 import * as sports from './plugins/sports.mjs';
 import * as weather from './plugins/weather.mjs';
+import * as homeassistant from './plugins/homeassistant.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(__dirname, 'web');
 const SERVICE = 'badge-console-host';
+const ACTION_PORT = Number(process.env.BADGE_CONSOLE_ACTION_PORT || 4174);
 
-const PLUGINS = [openclaw, anthropic, openai, stocks, sports, weather];
-export const runtime = new PluginRuntime(PLUGINS);
+const PLUGINS = [openclaw, anthropic, openai, stocks, sports, weather, homeassistant];
+export const runtime = new PluginRuntime(PLUGINS, { actionPort: ACTION_PORT });
+
+let actionServer = null;
 
 function sendJson(res, status, body) {
   const buf = Buffer.from(JSON.stringify(body));
@@ -177,8 +182,9 @@ const server = http.createServer(async (req, res) => {
 
 export function start(port = Number(process.env.BADGE_CONSOLE_HOST_PORT || 4173)) {
   return new Promise((resolve) => {
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, '127.0.0.1', async () => {
       runtime.start();
+      actionServer = await startActionServer(runtime, ACTION_PORT);
       log.info(`badge-console-host: config page at http://127.0.0.1:${port}`);
       resolve(server);
     });
@@ -187,7 +193,10 @@ export function start(port = Number(process.env.BADGE_CONSOLE_HOST_PORT || 4173)
 
 export function stop() {
   runtime.stop();
-  return new Promise((resolve) => server.close(resolve));
+  return Promise.all([
+    new Promise((resolve) => server.close(resolve)),
+    actionServer ? new Promise((resolve) => actionServer.close(resolve)) : Promise.resolve(),
+  ]);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

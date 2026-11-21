@@ -71,6 +71,39 @@ test('a plugin that violates the contract (no cards array) is treated as an erro
   assert.match(result.error, /no cards array/);
 });
 
+test('handleAction() routes a tapped card id to the plugin that last pushed it', async () => {
+  resetConfigCacheForTests();
+  const calls = [];
+  const button = {
+    id: 'button-feed',
+    label: 'button-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    needsCredentials: [],
+    settingsSchema: [],
+    async poll() { return { cards: [{ id: 'btn-1', type: 'button' }] }; },
+    async onAction(ctx, cardId) { calls.push(cardId); },
+  };
+  const runtime = new PluginRuntime([button]);
+  await runtime.runOnce('button-feed'); // populates cardOwner as a side effect of a successful poll
+  await runtime.handleAction('btn-1');
+  assert.deepEqual(calls, ['btn-1']);
+});
+
+test('handleAction() throws on a card id no plugin has ever pushed', async () => {
+  resetConfigCacheForTests();
+  const runtime = new PluginRuntime([fakePlugin({ id: 'unrelated', cards: [] })]);
+  await assert.rejects(() => runtime.handleAction('never-pushed'), /No known card owner/);
+});
+
+test('handleAction() throws if the owning plugin has no onAction()', async () => {
+  resetConfigCacheForTests();
+  const infoOnly = fakePlugin({ id: 'info-feed', cards: [{ id: 'info-1' }] });
+  const runtime = new PluginRuntime([infoOnly]);
+  await runtime.runOnce('info-feed');
+  await assert.rejects(() => runtime.handleAction('info-1'), /has no onAction/);
+});
+
 test('reschedule only arms timers for enabled feeds, respecting minIntervalSeconds', async () => {
   resetConfigCacheForTests();
   const feed = fakePlugin({ id: 'scheduled-feed', cards: [] });

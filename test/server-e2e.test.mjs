@@ -61,9 +61,9 @@ test('pair -> enable openclaw feed -> test -> badge receives a real POST /cards'
 
   const base = `http://127.0.0.1:${hostPort}`;
 
-  // 1. Config page loads and lists all 6 plugins.
+  // 1. Config page loads and lists all 7 plugins.
   const state1 = await fetch(`${base}/api/state`).then((r) => r.json());
-  assert.equal(state1.feeds.length, 6);
+  assert.equal(state1.feeds.length, 7);
   assert.equal(state1.badge.paired, false);
 
   // 2. Pair with the fake badge.

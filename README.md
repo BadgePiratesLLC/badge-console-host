@@ -51,6 +51,7 @@ above. *(Releases aren't published yet — see "Status" below.)*
 | Stocks | yes (Finnhub, free tier) | one symbol; free tier is 60 calls/min, enforced |
 | Sports | no | one followed team, via ESPN's public scoreboard API |
 | Weather | no | current conditions via api.weather.gov (US only) |
+| Home Assistant | yes (long-lived access token) | one state card + one optional button card that calls an HA service — see `docs/PLUGINS.md` "Button cards" |
 
 **Not X/Twitter** — API access starts near $200/month, which doesn't fit
 a $45 device. See `docs/DECISIONS.md` before re-proposing it.

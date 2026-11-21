@@ -179,3 +179,21 @@ response JSON actually matches the shape `usage.data[].results[]` /
 for either provider was available in this dev environment to check that.
 If a real key becomes available, that's the next thing to run against it,
 not the error-handling contract (which is now proven).
+
+## Button cards: a second, LAN-bound listener instead of reusing the config server
+
+Nexus 7c9c1a15's 2026-11-21 scope addition ("button cards that CONTROL
+Home Assistant") needs the badge to report a tap back to the host. The
+config server in `server.mjs` binds `127.0.0.1` deliberately (it holds
+pairing/credential controls and has no auth of its own) — reusing it for
+badge callbacks would have meant either opening that whole page to the
+LAN or bolting an exception onto one route, both worse than a second,
+narrow listener. `action-server.mjs` binds `0.0.0.0` on its own port
+(`BADGE_CONSOLE_ACTION_PORT`, default 4174), exposes exactly one route
+(`POST /action`), and is gated by the same shared `AuthToken` the badge
+already requires on its own `/cards` endpoint — one secret, checked both
+directions, no new credential surface and no new provisioning step. The
+badge learns this port from an `X-Action-Port` header on every `/cards`
+push (see `docs/CardSchema.md` "Button cards" in the QACode_27 repo) and
+learns the host's IP from the TCP connection that push arrived on — it
+never needs to be told a host address separately.
