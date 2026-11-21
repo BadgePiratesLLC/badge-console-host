@@ -56,7 +56,7 @@ above. *(Releases aren't published yet — see "Status" below.)*
 **Not X/Twitter** — API access starts near $200/month, which doesn't fit
 a $45 device. See `docs/DECISIONS.md` before re-proposing it.
 
-## Status (2026-09-24)
+## Status (2026-11-21)
 
 Built and tested end-to-end against a simulated badge (see
 `test/server-e2e.test.mjs`) and against the real free/keyless APIs
@@ -94,6 +94,14 @@ itself):**
   three v1 feeds this same ticket covers — OpenClaw, Sports, Weather — were
   already live-tested (see `test/plugins-live.test.mjs`) before this
   status update; stocks was the one plugin still missing test coverage.
+
+**2026-11-21 update:** the one-line installers were pointing at a stale
+`v0.1.0` release (Sept 24) that predated the Home Assistant plugin,
+per-feed display-order UI, and file-backed logging — a buyer running
+`install.sh` today would have silently gotten old code. Cut `v0.1.1`
+(tag push → `release.yml`'s 3-OS matrix → published), so `latest` now
+matches `main`. No other packaging gap changed since Sept 24 — the repo
+visibility blocker below still stands.
 
 **Not yet verified:**
 
