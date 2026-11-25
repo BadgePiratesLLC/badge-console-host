@@ -76,6 +76,9 @@ export async function poll(ctx) {
         unit: '$',
         subtitle: 'spend today',
         state: 'neutral',
+        icon: 'anthropic',
+        color: '#CC785C',
+        order: 3,
         updatedAt: now,
         ttlSeconds: 900,
       },
@@ -86,6 +89,12 @@ export async function poll(ctx) {
         unit: '',
         subtitle: 'today',
         state: 'neutral',
+        icon: 'anthropic',
+        color: '#CC785C',
+        // Lower priority than the ticket's named v1 feed list (spend
+        // today, not token count) — pushed past the first page's worth of
+        // cards rather than competing with it for a grid slot.
+        order: 20,
         updatedAt: now,
         ttlSeconds: 900,
       },

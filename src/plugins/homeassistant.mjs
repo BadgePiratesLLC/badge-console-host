@@ -71,6 +71,9 @@ export async function poll(ctx) {
       unit: entity.attributes?.unit_of_measurement || '',
       subtitle: entity.attributes?.friendly_name || ctx.settings.stateEntityId,
       state: 'neutral',
+      icon: 'home',
+      color: '#2F9BE0',
+      order: 5,
       updatedAt: now,
       ttlSeconds: 300,
     });
@@ -84,6 +87,9 @@ export async function poll(ctx) {
       value: 'TAP',
       subtitle: ctx.settings.actionService || 'light.toggle',
       state: 'neutral',
+      icon: 'lightbulb',
+      color: '#F0A020',
+      order: 6,
       updatedAt: now,
       ttlSeconds: 0, // a button doesn't go stale the way a reading does
     });

@@ -39,16 +39,23 @@ export async function poll(ctx) {
   const price = q.c;
   const change = q.d;
   const pct = q.dp;
+  const up = change == null ? true : change >= 0;
   const now = Date.now();
   return {
     cards: [
       {
         id: `stocks-${symbol.toLowerCase()}`,
         title: symbol,
-        value: price != null ? price.toFixed(2) : '—',
-        unit: '$',
-        subtitle: pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% today` : '',
+        // Nexus 4ea60fad: the approved mockup's headline number for a
+        // stock tile is the day's percent move, not the raw price — the
+        // price is still one tap away, in subtitle.
+        value: pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` : '—',
+        unit: '',
+        subtitle: price != null ? `$${price.toFixed(2)}` : '',
         state: change == null ? 'neutral' : change >= 0 ? 'ok' : 'warn',
+        icon: up ? 'stock-up' : 'stock-down',
+        color: '#6C4FD6',
+        order: 2,
         updatedAt: now,
         ttlSeconds: 300,
       },

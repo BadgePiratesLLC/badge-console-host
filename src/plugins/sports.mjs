@@ -37,22 +37,58 @@ export async function poll(ctx) {
   const event = t.nextEvent?.[0];
   const comp = event?.competitions?.[0];
   const record = t.record?.items?.find((i) => i.type === 'total')?.summary || '—';
+  const abbr = t.abbreviation || team.toUpperCase();
 
+  let title = abbr;
+  let value = record;
   let subtitle = 'no upcoming game found';
   let state = 'neutral';
+
   if (comp) {
     const status = comp.status?.type;
     const home = comp.competitors?.find((c) => c.homeAway === 'home');
     const away = comp.competitors?.find((c) => c.homeAway === 'away');
     if (status?.state === 'in') {
-      subtitle = `${away?.team?.abbreviation} ${away?.score} – ${home?.score} ${home?.team?.abbreviation} (${status.shortDetail})`;
+      value = `${away?.score ?? '0'}-${home?.score ?? '0'}`;
+      title = `${abbr} ${status.period ? `Q${status.period}` : 'LIVE'}`;
+      subtitle = `${away?.team?.abbreviation} @ ${home?.team?.abbreviation} (${status.shortDetail})`;
       state = 'ok';
     } else if (status?.state === 'post') {
+      value = `${away?.score ?? '0'}-${home?.score ?? '0'}`;
       subtitle = `Final: ${away?.team?.abbreviation} ${away?.score} – ${home?.score} ${home?.team?.abbreviation}`;
       state = 'neutral';
     } else {
       subtitle = `${away?.team?.abbreviation} @ ${home?.team?.abbreviation}, ${status?.shortDetail || 'scheduled'}`;
       state = 'neutral';
+    }
+  } else {
+    // No upcoming game in the team-summary endpoint's nextEvent — ticket
+    // AC (Nexus 4ea60fad): "shows the next game or last score ... never
+    // blank". Fall back to the most recently completed game from the
+    // team's schedule rather than leaving this reading "no game" forever
+    // during a bye week or the off-season. A failed/empty fallback just
+    // keeps the "no upcoming game found" wording above — not worth
+    // failing the whole poll over a secondary lookup.
+    try {
+      const schedRes = await fetch(
+        `https://site.api.espn.com/apis/site/v2/sports/${sport}/teams/${encodeURIComponent(team)}/schedule`,
+      );
+      if (schedRes.ok) {
+        const sched = await schedRes.json();
+        const completed = (sched.events || []).filter(
+          (e) => e.competitions?.[0]?.status?.type?.state === 'post',
+        );
+        const lastComp = completed[completed.length - 1]?.competitions?.[0];
+        if (lastComp) {
+          const home = lastComp.competitors?.find((c) => c.homeAway === 'home');
+          const away = lastComp.competitors?.find((c) => c.homeAway === 'away');
+          const opponent = home?.team?.abbreviation === abbr ? away?.team?.abbreviation : home?.team?.abbreviation;
+          value = `${away?.score ?? '0'}-${home?.score ?? '0'}`;
+          subtitle = `Final vs ${opponent || '?'}`;
+        }
+      }
+    } catch {
+      // keep the "no upcoming game found" fallback set above
     }
   }
 
@@ -61,11 +97,14 @@ export async function poll(ctx) {
     cards: [
       {
         id: `sports-${team}`,
-        title: t.abbreviation || team.toUpperCase(),
-        value: record,
+        title,
+        value,
         unit: '',
         subtitle,
         state,
+        icon: 'football',
+        color: '#D6333F',
+        order: 1,
         updatedAt: now,
         ttlSeconds: 1800,
       },

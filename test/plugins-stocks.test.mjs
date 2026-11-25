@@ -113,10 +113,14 @@ test('stocks plugin returns a priced quote card on success, uppercasing the symb
       const card = result.cards[0];
       assert.equal(card.id, 'stocks-aapl');
       assert.equal(card.title, 'AAPL');
-      assert.equal(card.value, '227.50');
-      assert.equal(card.unit, '$');
+      // Nexus 4ea60fad: the headline value is the day's percent move (the
+      // approved mockup's tile design), not the raw price — price moved to
+      // subtitle.
+      assert.equal(card.value, '+0.6%');
+      assert.equal(card.unit, '');
+      assert.match(card.subtitle, /\$227\.50/);
       assert.equal(card.state, 'ok');
-      assert.match(card.subtitle, /\+0\.55% today/);
+      assert.equal(card.icon, 'stock-up');
     },
   );
 });
@@ -127,6 +131,7 @@ test('stocks plugin marks a down day as warn, not ok', async () => {
     async () => {
       const result = await pollStocks({ settings: { symbol: 'MSFT' }, getSecret: async () => 'a-key' });
       assert.equal(result.cards[0].state, 'warn');
+      assert.equal(result.cards[0].icon, 'stock-down');
     },
   );
 });

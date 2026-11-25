@@ -67,6 +67,9 @@ export async function poll(ctx) {
         unit: '$',
         subtitle: 'spend today',
         state: 'neutral',
+        icon: 'openai',
+        color: '#10A37F',
+        order: 4,
         updatedAt: now,
         ttlSeconds: 900,
       },
@@ -77,6 +80,11 @@ export async function poll(ctx) {
         unit: '',
         subtitle: 'today',
         state: 'neutral',
+        icon: 'openai',
+        color: '#10A37F',
+        // See anthropic.mjs's matching comment: lower priority than the
+        // ticket's named v1 feed (spend today), not a page-1 tile.
+        order: 21,
         updatedAt: now,
         ttlSeconds: 900,
       },

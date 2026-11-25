@@ -49,17 +49,26 @@ export async function poll(ctx) {
     throw new Error(`Nearest station (${stationId}) has no recent observation.`);
   }
   const tempF = Math.round((p.temperature.value * 9) / 5 + 32);
+  // Only the one weather icon the badge draws (CardIcons.cpp) actually
+  // exists today — showing it on a rainy/cloudy reading would be a wrong
+  // icon, not a missing one, so this only fires on an actually-clear
+  // description. CardIcon::None (the default) just means no icon, never a
+  // crash — see CardSchema.md.
+  const icon = /clear|sunny|fair/i.test(p.textDescription || '') ? 'weather-sunny' : 'none';
 
   const now = Date.now();
   return {
     cards: [
       {
         id: 'weather-current',
-        title: 'Weather',
+        title: 'KC Weather',
         value: tempF,
         unit: '°F',
         subtitle: p.textDescription || '',
         state: 'neutral',
+        icon,
+        color: '#1BA8C7',
+        order: 0,
         updatedAt: now,
         ttlSeconds: 1800,
       },
