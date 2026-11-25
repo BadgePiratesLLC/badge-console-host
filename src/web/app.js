@@ -38,7 +38,7 @@ function renderBadge(badge) {
     document.getElementById('badge-host').value = badge.host;
     document.getElementById('badge-port').value = badge.port;
   } else {
-    el.textContent = 'Not paired yet — enter the badge’s IP and the token shown on its Wi-Fi setup portal.';
+    el.textContent = 'Not paired yet — on the badge, open Cards and press Pair, then enter the badge’s IP and the 6-digit code shown here.';
     el.className = 'status-line warn';
   }
 }
@@ -196,12 +196,13 @@ function renderFeed(feed, sortedFeeds, index) {
 document.getElementById('pair-btn').addEventListener('click', async () => {
   const host = document.getElementById('badge-host').value.trim();
   const port = Number(document.getElementById('badge-port').value) || 80;
-  const token = document.getElementById('badge-token').value.trim();
+  const code = document.getElementById('badge-code').value.trim();
   const resultEl = document.getElementById('pair-result');
   resultEl.textContent = 'pairing…';
   try {
-    await api('/api/badge/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host, port, token }) });
+    await api('/api/badge/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host, port, code }) });
     resultEl.textContent = 'Paired.';
+    document.getElementById('badge-code').value = ''; // one-time code — never leave it sitting in the field
     loadState();
   } catch (e) {
     resultEl.textContent = `Failed: ${e.message}`;

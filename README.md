@@ -29,9 +29,12 @@ above. *(Releases aren't published yet — see "Status" below.)*
 
 ## For a buyer: using it
 
-1. **Pair.** Power on the badge, put it in Wi-Fi setup mode, and its
-   portal page shows a one-time token. Type the badge's IP (or use "find
-   on network") and paste the token into the config page.
+1. **Pair.** Once the badge is on your Wi-Fi, open its Cards screen and
+   press Pair — it shows a one-time 6-digit code, valid for 5 minutes.
+   Type the badge's IP (or use "find on network") and that code into the
+   config page. The badge's own long-lived device token never has to be
+   read or copied by anyone; the config page gets it automatically as
+   part of this exchange.
 2. **Turn on feeds**, set a poll interval and any per-feed settings
    (ticker symbol, team, location). Each feed that needs a credential has
    a field for it right there — the key goes straight to your OS keychain

@@ -57,24 +57,33 @@ export async function pushCards(host, port, cards, { timeoutMs = 5000, actionPor
 }
 
 /**
- * Pairing: try a harmless empty POST /cards with the candidate token. 401
- * means wrong token; a network error means wrong host/port or badge is off.
- * Both are reported back verbatim rather than collapsed into one message,
- * since the fix a buyer needs is different for each.
+ * Pairing (Nexus 2f45b023): exchange the 6-digit code shown on the badge's
+ * own Pair screen for its long-lived device token, over POST /pair. The
+ * human never sees or types that token — this is the one function that
+ * does, and only once per pairing. A 401 means the code was wrong, 410
+ * means it expired or was already used (badge generates a fresh one each
+ * time its Pair screen opens), 429 means the badge's own lockout tripped
+ * after repeated wrong codes; a network error means wrong host/port or the
+ * badge is off. All four are reported back verbatim rather than collapsed
+ * into one message, since the fix a buyer needs is different for each.
  */
-export async function testPairing(host, port, token) {
+export async function exchangePairCode(host, port, code) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
   try {
-    const res = await fetch(badgeUrl(host, port, '/cards'), {
+    const res = await fetch(badgeUrl(host, port, '/pair'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': token },
-      body: '[]',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
       signal: controller.signal,
     });
-    if (res.status === 401) return { ok: false, reason: 'Badge rejected the token — check it against the badge\'s Wi-Fi setup portal (GET /token).' };
+    if (res.status === 401) return { ok: false, reason: 'Badge rejected that code — check it against the badge\'s Pair screen.' };
+    if (res.status === 410) return { ok: false, reason: 'That code expired or was already used — get a fresh one from the badge\'s Pair screen.' };
+    if (res.status === 429) return { ok: false, reason: 'Too many wrong codes were entered — the badge is locked out for a few minutes.' };
     if (!res.ok) return { ok: false, reason: `Badge responded HTTP ${res.status}.` };
-    return { ok: true };
+    const body = await res.json().catch(() => null);
+    if (!body?.token) return { ok: false, reason: 'Badge accepted the code but did not return a token.' };
+    return { ok: true, token: body.token };
   } catch (e) {
     return { ok: false, reason: `Could not reach ${host}:${port} — ${e.message}` };
   } finally {

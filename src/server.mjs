@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, saveConfig, updateConfig, getFeedConfig } from './config-store.mjs';
 import { setSecret, deleteSecret, hasSecret } from './credential-store.mjs';
-import { testPairing, setBadgeToken } from './badge-client.mjs';
+import { exchangePairCode, setBadgeToken } from './badge-client.mjs';
 import { browse as mdnsBrowse } from './mdns.mjs';
 import { PluginRuntime } from './plugin-runtime.mjs';
 import { start as startActionServer } from './action-server.mjs';
@@ -143,14 +143,14 @@ async function handleApi(req, res, pathname) {
 
   if (pathname === '/api/badge/pair' && req.method === 'POST') {
     const body = await readJsonBody(req);
-    const { host, port, token } = body;
-    if (!host || !token) return sendJson(res, 400, { error: 'host and token are required' });
-    const test = await testPairing(host, port || 80, token);
-    if (!test.ok) {
-      log.error(`Pairing with ${host}:${port || 80} failed: ${test.reason}`);
-      return sendJson(res, 502, { ok: false, error: test.reason });
+    const { host, port, code } = body;
+    if (!host || !code) return sendJson(res, 400, { error: 'host and code are required' });
+    const exchange = await exchangePairCode(host, port || 80, code);
+    if (!exchange.ok) {
+      log.error(`Pairing with ${host}:${port || 80} failed: ${exchange.reason}`);
+      return sendJson(res, 502, { ok: false, error: exchange.reason });
     }
-    await setBadgeToken(token);
+    await setBadgeToken(exchange.token);
     updateConfig((cfg) => {
       cfg.badge = { host, port: port || 80, paired: true };
     });
