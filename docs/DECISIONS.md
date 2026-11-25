@@ -197,3 +197,29 @@ badge learns this port from an `X-Action-Port` header on every `/cards`
 push (see `docs/CardSchema.md` "Button cards" in the QACode_27 repo) and
 learns the host's IP from the TCP connection that push arrived on — it
 never needs to be told a host address separately.
+
+## Pairing moved from "paste the long token" to "type a 6-digit code"
+
+Nexus 2f45b023. The original pairing UI asked a buyer to copy the badge's
+32-char hex device token off its Wi-Fi setup portal and paste it into this
+config page. That token then also got shown, unredacted, on the badge's
+own Cards screen in v2.2.1 (Kevin: *"that code...wtf"*), which settled the
+bigger problem: a secret that a person has to read and retype is a secret
+that ends up displayed somewhere, sooner or later.
+
+`testPairing(host, port, token)` is gone; `badge-client.mjs` now has
+`exchangePairCode(host, port, code)`, which `POST`s a short-lived 6-digit
+code to the badge's new `/pair` route and gets the real device token back
+in the response. `/api/badge/pair` takes `{ host, port, code }` instead of
+`{ host, port, token }` — a breaking API change, intentional, since the
+old shape could not express "the server, not the caller, decides the
+token." The config page's own "Pair" field changed from "Token" to "Code"
+to match.
+
+One thing this does NOT do: verify the exchanged token actually works
+against `POST /cards` before storing it (the old `testPairing()` did an
+empty-array probe push for exactly that). Not needed anymore — a 200 from
+`/pair` already means the badge itself just minted and handed back that
+token, so there's nothing left to probe for. `pushCards()` still surfaces
+a bad/expired token plainly on the next real push if something ever does
+go wrong downstream.

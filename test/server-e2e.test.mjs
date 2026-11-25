@@ -28,7 +28,10 @@ fs.writeFileSync(
 
 const { start, stop } = await import('../src/server.mjs');
 
-function fakeBadge() {
+// validCode/deviceToken mirror what a real badge's AuthToken does (Nexus
+// 2f45b023): a short-lived pairing code exchanged over POST /pair for the
+// real, long-lived device token that gates POST /cards.
+function fakeBadge({ validCode = '654321', deviceToken = 'test-token-123' } = {}) {
   const received = [];
   const server = http.createServer((req, res) => {
     if (req.method === 'POST' && req.url === '/cards') {
@@ -39,6 +42,21 @@ function fakeBadge() {
         received.push({ token, cards: JSON.parse(body || '[]') });
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('ok');
+      });
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/pair') {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        const { code } = JSON.parse(body || '{}');
+        if (code !== validCode) {
+          res.writeHead(401, { 'Content-Type': 'text/plain' });
+          res.end('wrong code');
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ token: deviceToken }));
       });
       return;
     }
@@ -66,15 +84,14 @@ test('pair -> enable openclaw feed -> test -> badge receives a real POST /cards'
   assert.equal(state1.feeds.length, 7);
   assert.equal(state1.badge.paired, false);
 
-  // 2. Pair with the fake badge.
+  // 2. Pair with the fake badge using its one-time 6-digit code.
   const pairRes = await fetch(`${base}/api/badge/pair`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ host: '127.0.0.1', port: badgePort, token: 'test-token-123' }),
+    body: JSON.stringify({ host: '127.0.0.1', port: badgePort, code: '654321' }),
   });
   assert.equal(pairRes.status, 200);
-  assert.equal(badge.received.length, 1, 'pairing does a harmless empty POST /cards');
-  assert.equal(badge.received[0].cards.length, 0);
+  assert.equal(badge.received.length, 0, 'pairing is a POST /pair exchange now, not a POST /cards probe');
 
   // 3. Enable the openclaw feed (no credential needed — real local data).
   const enableRes = await fetch(`${base}/api/feeds/openclaw`, {
@@ -96,7 +113,7 @@ test('pair -> enable openclaw feed -> test -> badge receives a real POST /cards'
   // paired auth token.
   const pushes = badge.received.filter((r) => r.cards.length > 0);
   assert.ok(pushes.length >= 1);
-  assert.equal(pushes.at(-1).token, 'test-token-123');
+  assert.equal(pushes.at(-1).token, 'test-token-123', 'push carries the token /pair handed back, not the code');
   assert.equal(pushes.at(-1).cards[0].id, 'openclaw-activity');
 
   // 6. Status now shows lastSuccess for this feed, not an error.
@@ -106,10 +123,8 @@ test('pair -> enable openclaw feed -> test -> badge receives a real POST /cards'
   assert.equal(feed.status.lastError, null);
 });
 
-test('a wrong badge token fails pairing cleanly and never gets stored', async (t) => {
-  const badge = fakeBadge();
-  badge.server.removeAllListeners('request');
-  badge.server.on('request', (req, res) => { res.writeHead(401); res.end(); });
+test('a wrong pairing code fails pairing cleanly and never stores a token', async (t) => {
+  const badge = fakeBadge({ validCode: '654321' });
   await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
   const badgePort = badge.server.address().port;
 
@@ -124,11 +139,11 @@ test('a wrong badge token fails pairing cleanly and never gets stored', async (t
   const res = await fetch(`${base}/api/badge/pair`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ host: '127.0.0.1', port: badgePort, token: 'wrong-token' }),
+    body: JSON.stringify({ host: '127.0.0.1', port: badgePort, code: '000000' }),
   });
   assert.equal(res.status, 502);
   const body = await res.json();
-  assert.match(body.error, /rejected the token/);
+  assert.match(body.error, /rejected that code/);
 });
 
 test('display order is a real, persisted per-feed setting — this is what the config page\'s up/down buttons drive', async (t) => {
