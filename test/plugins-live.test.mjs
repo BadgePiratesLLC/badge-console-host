@@ -21,8 +21,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { setScratchHome } from './_helpers.mjs';
 
-const { poll: pollWeather } = await import('../src/plugins/weather.mjs');
-const { poll: pollSports } = await import('../src/plugins/sports.mjs');
+const { poll: pollWeather, onEditValue: onEditWeatherValue } = await import('../src/plugins/weather.mjs');
+const { poll: pollSports, onEditValue: onEditSportsValue } = await import('../src/plugins/sports.mjs');
 
 test('weather plugin returns a real current-conditions card for a US location', { timeout: 15000 }, async () => {
   const result = await pollWeather({ settings: { lat: '39.0997', lon: '-94.5786' }, getSecret: async () => null });
@@ -105,4 +105,28 @@ test('openclaw plugin errors (not a zero) when no log exists', async () => {
   } finally {
     restoreHome();
   }
+});
+
+// --- Nexus 281ee5a2 slice 2: onEditValue (layout editor), single-instance plugins ---
+
+test('weather onEditValue parses "lat,lon" and replaces both settings, same card id (no newCardId)', async () => {
+  const result = await onEditWeatherValue({ settings: { lat: '39.0997', lon: '-94.5786' } }, 'weather-current', '40.7128,-74.0060');
+  assert.equal(result.settings.lat, '40.7128');
+  assert.equal(result.settings.lon, '-74.0060');
+  assert.equal(result.newCardId, undefined);
+});
+
+test('weather onEditValue rejects anything that is not "lat,lon"', async () => {
+  await assert.rejects(() => onEditWeatherValue({ settings: {} }, 'weather-current', 'Kansas City'), /Expected "lat,lon"/);
+  await assert.rejects(() => onEditWeatherValue({ settings: {} }, 'weather-current', 'abc,def'), /must both be numbers/);
+});
+
+test('sports onEditValue replaces the team setting and reports the new (team-derived) card id', async () => {
+  const result = await onEditSportsValue({ settings: { team: 'KC' } }, 'sports-kc', 'lal');
+  assert.equal(result.settings.team, 'LAL');
+  assert.equal(result.newCardId, 'sports-lal');
+});
+
+test('sports onEditValue rejects a blank team', async () => {
+  await assert.rejects(() => onEditSportsValue({ settings: { team: 'KC' } }, 'sports-kc', '  '), /cannot be blank/);
 });

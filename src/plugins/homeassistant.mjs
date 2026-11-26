@@ -80,6 +80,8 @@ export async function poll(ctx) {
       state: 'neutral',
       icon: 'home',
       color: '#2F9BE0',
+      editLabel: 'Entity ID',
+      editValue: ctx.settings.stateEntityId,
       order: 5,
       updatedAt: now,
       ttlSeconds: 300,
@@ -109,6 +111,8 @@ export async function poll(ctx) {
       state: isOn ? 'ok' : 'neutral',
       icon: 'lightbulb',
       color: isOn ? '#F0A020' : '#3A3A3A', // bright amber on, dim grey off/unknown
+      editLabel: 'Entity ID',
+      editValue: ctx.settings.actionEntityId,
       order: 6,
       updatedAt: now,
       ttlSeconds: 0, // a button doesn't go stale the way a reading does
@@ -136,4 +140,23 @@ export async function onAction(ctx, cardId) {
     method: 'POST',
     body: JSON.stringify({ entity_id: ctx.settings.actionEntityId }),
   });
+}
+
+// Nexus 281ee5a2 slice 2: this feed can push two cards (state + button)
+// from two different settings keys, so — unlike sports/weather — editing
+// has to figure out which half of the config a given card id belongs to
+// before it knows what to change. Single-instance either way (one state
+// entity, one action entity): deleting either tile has no partial
+// "just unset this half" option in this slice, so it falls back to the
+// whole-feed-disable behavior like every other single-instance plugin.
+export async function onEditValue(ctx, cardId, newValue) {
+  const next = String(newValue || '').trim();
+  if (!next) throw new Error('Entity id cannot be blank.');
+  if (ctx.settings.stateEntityId && cardId === stateCardId(ctx.settings.stateEntityId)) {
+    return { settings: { ...ctx.settings, stateEntityId: next }, newCardId: stateCardId(next) };
+  }
+  if (ctx.settings.actionEntityId && cardId === actionCardId(ctx.settings.actionEntityId)) {
+    return { settings: { ...ctx.settings, actionEntityId: next }, newCardId: actionCardId(next) };
+  }
+  throw new Error(`"${cardId}" isn't one of this feed's configured entity cards.`);
 }

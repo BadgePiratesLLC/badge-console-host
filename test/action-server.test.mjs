@@ -21,11 +21,11 @@ function fakeRuntime(handler) {
   return { handleAction: handler };
 }
 
-async function post(server, { headers = {}, body } = {}) {
+async function post(server, { headers = {}, body, path = '/action' } = {}) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/action`, {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
@@ -80,4 +80,74 @@ test('a body with no id is rejected with 400 once auth has passed', async () => 
   const server = createActionServer(fakeRuntime(async () => {}));
   const res = await post(server, { headers: { 'X-Auth-Token': 'real-token' }, body: {} });
   assert.equal(res.status, 400);
+});
+
+// --- Nexus 281ee5a2 slice 2: POST /edit (layout editor edit-in-place) ---
+
+function fakeRuntimeWithEdit(handler) {
+  return { handleAction: async () => {}, handleEdit: handler };
+}
+
+test('/edit requires the same X-Auth-Token as /action', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeRuntimeWithEdit(async () => {}));
+  const res = await post(server, { path: '/edit', body: { id: 'c1', color: '#dc2626' } });
+  assert.equal(res.status, 401);
+});
+
+test('/edit with none of value/color/delete present is rejected with 400 before reaching the runtime', async () => {
+  await setBadgeToken('real-token');
+  let called = false;
+  const server = createActionServer(fakeRuntimeWithEdit(async () => { called = true; }));
+  const res = await post(server, { path: '/edit', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'c1' } });
+  assert.equal(res.status, 400);
+  assert.equal(called, false);
+});
+
+test('/edit routes {id, value} to runtime.handleEdit as { value }', async () => {
+  await setBadgeToken('real-token');
+  const calls = [];
+  const server = createActionServer(fakeRuntimeWithEdit(async (id, change) => { calls.push([id, change]); }));
+  const res = await post(server, { path: '/edit', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'c1', value: 'TSLA' } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(calls, [['c1', { value: 'TSLA' }]]);
+});
+
+test('/edit routes {id, color} to runtime.handleEdit as { color }', async () => {
+  await setBadgeToken('real-token');
+  const calls = [];
+  const server = createActionServer(fakeRuntimeWithEdit(async (id, change) => { calls.push([id, change]); }));
+  const res = await post(server, { path: '/edit', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'c1', color: '#dc2626' } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(calls, [['c1', { color: '#dc2626' }]]);
+});
+
+test('/edit routes {id, delete: true} to runtime.handleEdit as { deleteTile: true }', async () => {
+  await setBadgeToken('real-token');
+  const calls = [];
+  const server = createActionServer(fakeRuntimeWithEdit(async (id, change) => { calls.push([id, change]); }));
+  const res = await post(server, { path: '/edit', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'c1', delete: true } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(calls, [['c1', { deleteTile: true }]]);
+});
+
+test('/edit on an unknown card id surfaces as 404', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeRuntimeWithEdit(async () => { throw new Error('No known card owner for id "x".'); }));
+  const res = await post(server, { path: '/edit', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'x', color: '#dc2626' } });
+  assert.equal(res.status, 404);
+});
+
+test('/edit when the plugin rejects the edit for another reason surfaces as 502', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeRuntimeWithEdit(async () => { throw new Error('Already tracking "TSLA" in another tile.'); }));
+  const res = await post(server, { path: '/edit', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'c1', value: 'TSLA' } });
+  assert.equal(res.status, 502);
+});
+
+test('/action and /edit stay independent — a runtime with handleAction only still answers /action (no /edit support)', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeRuntime(async (id) => {}));
+  const res = await post(server, { path: '/action', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'btn-1' } });
+  assert.equal(res.status, 200);
 });

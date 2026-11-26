@@ -11,6 +11,8 @@ import {
   poll as pollStocks,
   description,
   isMarketOpen,
+  onEditValue,
+  onRemoveInstance,
   _resetCacheForTests,
 } from '../src/plugins/stocks.mjs';
 
@@ -271,4 +273,42 @@ test('with no symbols setting at all, defaults to AAPL', async (t) => {
 test('stocks plugin description advertises the keyless default, not a required key', () => {
   assert.doesNotMatch(description, /no key stored/i);
   assert.match(description, /keyless/i);
+});
+
+// --- Nexus 281ee5a2 slice 2: onEditValue/onRemoveInstance (layout editor) ---
+
+test('onEditValue replaces the matching slot in place, same index, and reports the new card id', async () => {
+  const result = await onEditValue({ settings: { symbols: 'AAPL,TSLA' } }, 'stocks-aapl', 'goog');
+  assert.equal(result.settings.symbols, 'GOOG,TSLA');
+  assert.equal(result.newCardId, 'stocks-goog');
+});
+
+test('onEditValue rejects a symbol that would collide with another configured slot', async () => {
+  await assert.rejects(
+    () => onEditValue({ settings: { symbols: 'AAPL,TSLA' } }, 'stocks-aapl', 'tsla'),
+    /Already tracking/,
+  );
+});
+
+test('onEditValue throws for a card id that is not one of the configured symbols', async () => {
+  await assert.rejects(
+    () => onEditValue({ settings: { symbols: 'AAPL,TSLA' } }, 'stocks-goog', 'msft'),
+    /isn't one of this feed's configured symbols/,
+  );
+});
+
+test('onEditValue rejects a blank symbol', async () => {
+  await assert.rejects(() => onEditValue({ settings: { symbols: 'AAPL' } }, 'stocks-aapl', '   '), /cannot be blank/);
+});
+
+test('onRemoveInstance drops just that symbol and reports not-empty when others remain', async () => {
+  const result = await onRemoveInstance({ settings: { symbols: 'AAPL,TSLA' } }, 'stocks-aapl');
+  assert.equal(result.settings.symbols, 'TSLA');
+  assert.equal(result.empty, false);
+});
+
+test('onRemoveInstance reports empty: true once the last symbol is removed', async () => {
+  const result = await onRemoveInstance({ settings: { symbols: 'AAPL' } }, 'stocks-aapl');
+  assert.equal(result.settings.symbols, '');
+  assert.equal(result.empty, true);
 });

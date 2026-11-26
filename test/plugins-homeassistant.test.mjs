@@ -9,7 +9,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { poll, onAction } from '../src/plugins/homeassistant.mjs';
+import { poll, onAction, onEditValue } from '../src/plugins/homeassistant.mjs';
 
 function withMockFetch(handler, fn) {
   const original = globalThis.fetch;
@@ -178,4 +178,40 @@ test('onAction() rejects a malformed actionService before ever calling fetch', a
     },
   );
   assert.equal(called, false);
+});
+
+// --- Nexus 281ee5a2 slice 2: onEditValue (layout editor), both card halves ---
+
+test('onEditValue on the state card id replaces stateEntityId and reports its new card id', async () => {
+  const result = await onEditValue(
+    { settings: { ...baseSettings, stateEntityId: 'sensor.x' } },
+    'ha-state-sensor_x',
+    'sensor.y',
+  );
+  assert.equal(result.settings.stateEntityId, 'sensor.y');
+  assert.equal(result.newCardId, 'ha-state-sensor_y');
+});
+
+test('onEditValue on the action/button card id replaces actionEntityId and reports its new card id', async () => {
+  const result = await onEditValue(
+    { settings: { ...baseSettings, actionEntityId: 'light.x' } },
+    'ha-action-light_x',
+    'light.y',
+  );
+  assert.equal(result.settings.actionEntityId, 'light.y');
+  assert.equal(result.newCardId, 'ha-action-light_y');
+});
+
+test('onEditValue rejects a card id that matches neither configured entity', async () => {
+  await assert.rejects(
+    () => onEditValue({ settings: { ...baseSettings, stateEntityId: 'sensor.x' } }, 'ha-state-sensor_z', 'sensor.y'),
+    /isn't one of this feed's configured entity cards/,
+  );
+});
+
+test('onEditValue rejects a blank entity id', async () => {
+  await assert.rejects(
+    () => onEditValue({ settings: { ...baseSettings, stateEntityId: 'sensor.x' } }, 'ha-state-sensor_x', '  '),
+    /cannot be blank/,
+  );
 });

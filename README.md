@@ -59,6 +59,49 @@ above. *(Releases aren't published yet — see "Status" below.)*
 **Not X/Twitter** — API access starts near $200/month, which doesn't fit
 a $45 device. See `docs/DECISIONS.md` before re-proposing it.
 
+## Status (2026-11-26, Nexus 281ee5a2 slice 2)
+
+**Since the last status update (Nexus 281ee5a2 slice 1 + the 31f026ef
+credential-UI fix, both v0.1.7):**
+
+- The badge-served layout editor (QACode_27's `GET /layout`) can now edit
+  a tile in place, not just view it: tap a tile to rename its value
+  (stock symbol, team, location, HA entity), recolor it, or delete it.
+  This host only ever receives the resulting edit over the existing
+  `/action`-style reverse channel — see `docs/PLUGINS.md`'s new
+  **Editable tiles** section for the plugin contract
+  (`editLabel`/`editValue`/`onEditValue`/`onRemoveInstance`) and
+  QACode_27's `docs/CardSchema.md` for the badge-side wire format
+  (`remove: true`, `/tile-edit`, `/edit`).
+- `stocks.mjs` is the one plugin with real multi-instance removal
+  (`onRemoveInstance`) — deleting a symbol tile removes just that symbol,
+  not the whole feed. `sports.mjs`/`weather.mjs`/`homeassistant.mjs` are
+  single-instance, so deleting their one tile disables the feed; this is
+  the documented default for any plugin that doesn't implement
+  `onRemoveInstance`.
+- `weather.mjs`'s edit field is raw `"lat,lon"` text, not a city/ZIP
+  search — geocoding free-text locations is real work the approved
+  layout-editor mockup round didn't cover, so this is "edit what the
+  setting actually is" until that lands.
+- A tile's color override (the edit panel's swatch picker) lives in
+  `config-store.mjs`'s new `cardOverrides`, independent of any plugin's
+  settings, and is re-applied after every poll so it survives the next
+  scheduled push. `PluginRuntime._poll()` also now diffs each poll's card
+  ids against the previous one and pushes an explicit removal for
+  anything that disappeared (a removed stock symbol, a disabled feed) —
+  previously that tile would have just gone stale on the badge forever.
+- Covered by 30 new tests across `test/plugin-runtime.test.mjs`,
+  `test/action-server.test.mjs`, `test/plugins-stocks.test.mjs`,
+  `test/plugins-live.test.mjs` (sports/weather), and
+  `test/plugins-homeassistant.test.mjs` (95 total, all green). Also
+  verified end-to-end against a mock server + headless Chromium
+  (rename, recolor, delete, and the "value field hidden for a
+  non-editable card" case) — see that ticket's closing comment for
+  screenshots.
+- **Not done:** the add-a-tile catalog and drag/reorder (slices 3-4 of
+  this same layout editor) — tapping an empty slot or "+ Add" shows a
+  "coming in a later update" message rather than doing anything.
+
 ## Status (2026-11-26, v0.1.7)
 
 **Since the last status update (Nexus 7175f3fc — desk console 2.3.2):**

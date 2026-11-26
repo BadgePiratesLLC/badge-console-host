@@ -66,14 +66,57 @@ export function _resetCacheForTests() {
   nextAllowedFetchAt.clear();
 }
 
-function parseSymbols(settings) {
+// The true current list, with no "nothing configured yet" fallback — used
+// by onEditValue/onRemoveInstance below, which need to tell a genuinely
+// empty list apart from "defaulted to AAPL because nothing's set yet".
+function resolvedSymbolList(settings) {
   const raw = settings?.symbols ?? settings?.symbol ?? 'AAPL';
-  const symbols = String(raw)
+  return String(raw)
     .split(',')
     .map((s) => s.trim().toUpperCase())
     .filter(Boolean)
     .slice(0, 3);
+}
+
+function parseSymbols(settings) {
+  const symbols = resolvedSymbolList(settings);
   return symbols.length ? symbols : ['AAPL'];
+}
+
+function symbolFromCardId(cardId) {
+  const m = /^stocks-(.+)$/.exec(cardId || '');
+  return m ? m[1].toUpperCase() : null;
+}
+
+// Nexus 281ee5a2 slice 2: the layout editor's tap-to-edit panel calls this
+// when a buyer changes a stock tile's "Symbol" field. Replaces that slot
+// in place (same index) rather than appending — the id changes with it
+// (stocks-aapl -> stocks-tsla), which is why the runtime needs newCardId
+// back, to carry the card's color override and grid position forward.
+export async function onEditValue(ctx, cardId, newValue) {
+  const symbols = resolvedSymbolList(ctx.settings);
+  const oldSymbol = symbolFromCardId(cardId);
+  const index = oldSymbol ? symbols.indexOf(oldSymbol) : -1;
+  if (index === -1) throw new Error(`"${cardId}" isn't one of this feed's configured symbols.`);
+  const next = String(newValue || '').trim().toUpperCase();
+  if (!next) throw new Error('Symbol cannot be blank.');
+  if (symbols.some((s, i) => i !== index && s === next)) {
+    throw new Error(`Already tracking "${next}" in another tile.`);
+  }
+  symbols[index] = next;
+  return { settings: { ...ctx.settings, symbols: symbols.join(',') }, newCardId: `stocks-${next.toLowerCase()}` };
+}
+
+// Removes just this one symbol (the "Delete tile" button on a stock
+// tile). `empty: true` tells the runtime no symbols are left, so it
+// should disable the whole feed rather than leave it polling nothing.
+export async function onRemoveInstance(ctx, cardId) {
+  const symbols = resolvedSymbolList(ctx.settings);
+  const symbol = symbolFromCardId(cardId);
+  const index = symbol ? symbols.indexOf(symbol) : -1;
+  if (index === -1) throw new Error(`"${cardId}" isn't one of this feed's configured symbols.`);
+  symbols.splice(index, 1);
+  return { settings: { ...ctx.settings, symbols: symbols.join(',') }, empty: symbols.length === 0 };
 }
 
 // NYSE/Nasdaq regular session, 9:30-16:00 America/New_York, Mon-Fri.
@@ -194,6 +237,8 @@ function buildCard(symbol, quote, { open, stale, order }) {
     state,
     icon: up ? 'stock-up' : 'stock-down',
     color: '#6C4FD6',
+    editLabel: 'Symbol',
+    editValue: symbol,
     order,
     updatedAt: Date.now(),
     ttlSeconds: 1800,

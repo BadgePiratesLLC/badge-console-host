@@ -108,10 +108,29 @@ export async function poll(ctx) {
         state: 'neutral',
         icon,
         color: '#1BA8C7',
+        editLabel: 'Location (lat,lon)',
+        editValue: `${lat},${lon}`,
         order: 0,
         updatedAt: now,
         ttlSeconds: 1800,
       },
     ],
   };
+}
+
+// Nexus 281ee5a2 slice 2: single-instance (one location), so editing just
+// replaces the lat/lon settings — same id either way ("weather-current"
+// isn't derived from the location), so no newCardId. Takes raw
+// "lat,lon" text, not a city/ZIP search — geocoding a free-text place
+// name is real work the approved layout-editor mockup round explicitly
+// didn't cover yet (see that ticket's mockup note); this is the honest
+// "edit what the setting actually is" version until that lands.
+export async function onEditValue(ctx, cardId, newValue) {
+  const parts = String(newValue || '').split(',').map((s) => s.trim());
+  if (parts.length !== 2) throw new Error('Expected "lat,lon", e.g. "39.0997,-94.5786".');
+  const [lat, lon] = parts;
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lon))) {
+    throw new Error('Latitude and longitude must both be numbers.');
+  }
+  return { settings: { ...ctx.settings, lat, lon } };
 }
