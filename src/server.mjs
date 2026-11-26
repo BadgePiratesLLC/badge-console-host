@@ -96,7 +96,7 @@ async function handleApi(req, res, pathname) {
     for (const p of plugins) {
       const feedCfg = getFeedConfig(p.id, { intervalSeconds: p.defaultIntervalSeconds });
       const credState = {};
-      for (const account of p.needsCredentials) credState[account] = await hasSecret(SERVICE, account);
+      for (const cred of p.credentialsSchema) credState[cred.account] = await hasSecret(SERVICE, cred.account);
       withCreds.push({ ...p, config: feedCfg, status: status[p.id], credentials: credState });
     }
     return sendJson(res, 200, { feeds: withCreds, badge: { host: cfg.badge.host, port: cfg.badge.port, paired: cfg.badge.paired } });
@@ -138,7 +138,7 @@ async function handleApi(req, res, pathname) {
     const plugin = PLUGINS.find((p) => p.id === feedId);
     if (!plugin) return sendJson(res, 404, { error: 'no such feed' });
     const body = await readJsonBody(req);
-    if (!body.account || !plugin.needsCredentials.includes(body.account)) {
+    if (!body.account || !plugin.credentialsSchema.some((c) => c.account === body.account)) {
       return sendJson(res, 400, { error: 'unknown credential account for this feed' });
     }
     if (typeof body.value !== 'string' || body.value.length === 0) {
@@ -154,7 +154,7 @@ async function handleApi(req, res, pathname) {
     if (!plugin) return sendJson(res, 404, { error: 'no such feed' });
     const url = new URL(req.url, 'http://127.0.0.1');
     const account = url.searchParams.get('account');
-    if (!account || !plugin.needsCredentials.includes(account)) {
+    if (!account || !plugin.credentialsSchema.some((c) => c.account === account)) {
       return sendJson(res, 400, { error: 'unknown credential account for this feed' });
     }
     await deleteSecret(SERVICE, account);

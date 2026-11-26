@@ -31,7 +31,7 @@ test('a failing plugin poll writes its error to the log file', async () => {
     label: 'log-test-feed',
     defaultIntervalSeconds: 60,
     minIntervalSeconds: 1,
-    needsCredentials: [],
+    credentialsSchema: [],
     settingsSchema: [],
     async poll() { throw new Error('deliberate log-test failure'); },
   };

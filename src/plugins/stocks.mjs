@@ -25,7 +25,14 @@ export const label = 'Stock quotes';
 export const description = 'Up to 3 tickers’ last price and day change — free and keyless via Stooq/Yahoo by default. Add your own Finnhub key below to use that instead.';
 export const defaultIntervalSeconds = 300; // 5 min — the market-hours floor; poll() itself throttles further to 30 min outside market hours
 export const minIntervalSeconds = 60;
-export const needsCredentials = ['finnhub-api-key'];
+export const credentialsSchema = [
+  {
+    account: 'finnhub-api-key',
+    label: 'Finnhub API key (optional)',
+    helpUrl: 'https://finnhub.io/register',
+    required: false, // Stooq/Yahoo fallback works keyless; this just skips straight to Finnhub when set
+  },
+];
 export const settingsSchema = [
   { key: 'symbols', label: 'Ticker symbols (comma-separated, up to 3)', type: 'text', default: 'AAPL' },
 ];

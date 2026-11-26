@@ -9,7 +9,14 @@ export const label = 'OpenAI usage';
 export const description = 'Token usage and spend today, via the OpenAI organization Usage/Costs API.';
 export const defaultIntervalSeconds = 300;
 export const minIntervalSeconds = 60;
-export const needsCredentials = ['openai-admin-key'];
+export const credentialsSchema = [
+  {
+    account: 'openai-admin-key',
+    label: 'OpenAI Admin API key',
+    helpUrl: 'https://platform.openai.com/settings/organization/admin-keys',
+    required: true,
+  },
+];
 export const settingsSchema = [];
 
 const API_BASE = 'https://api.openai.com/v1/organization';

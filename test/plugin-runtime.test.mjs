@@ -17,7 +17,7 @@ function fakePlugin({ id, cards, shouldThrow }) {
     label: id,
     defaultIntervalSeconds: 60,
     minIntervalSeconds: 1,
-    needsCredentials: [],
+    credentialsSchema: [],
     settingsSchema: [],
     async poll() {
       if (shouldThrow) throw new Error(`${id} deliberately failed`);
@@ -61,7 +61,7 @@ test('a plugin that violates the contract (no cards array) is treated as an erro
     label: 'malformed',
     defaultIntervalSeconds: 60,
     minIntervalSeconds: 1,
-    needsCredentials: [],
+    credentialsSchema: [],
     settingsSchema: [],
     async poll() { return { notCards: true }; },
   };
@@ -79,7 +79,7 @@ test('handleAction() routes a tapped card id to the plugin that last pushed it',
     label: 'button-feed',
     defaultIntervalSeconds: 60,
     minIntervalSeconds: 1,
-    needsCredentials: [],
+    credentialsSchema: [],
     settingsSchema: [],
     async poll() { return { cards: [{ id: 'btn-1', type: 'button' }] }; },
     async onAction(ctx, cardId) { calls.push(cardId); },

@@ -2,7 +2,11 @@
 //
 // Contract (see README.md "Writing a plugin" for the full version a new
 // feed author reads):
-//   export const id, label, defaultIntervalSeconds, needsCredentials
+//   export const id, label, defaultIntervalSeconds, credentialsSchema
+//     credentialsSchema: [{ account, label, helpUrl?, required }, ...]
+//     — `required: false` means the feed works keylessly and the account
+//     is an opt-in upgrade (e.g. stocks' Finnhub key); the Feeds page
+//     only shows a "needs key" pill for a missing `required: true` one.
 //   export async function poll(ctx) -> { cards: [Card, ...] }
 //   ctx = { settings, getSecret(account), setStatusHint(text) }
 //
@@ -46,7 +50,7 @@ export class PluginRuntime {
       description: p.description || '',
       defaultIntervalSeconds: p.defaultIntervalSeconds,
       minIntervalSeconds: p.minIntervalSeconds || 1,
-      needsCredentials: p.needsCredentials || [],
+      credentialsSchema: p.credentialsSchema || [],
       settingsSchema: p.settingsSchema || [],
     }));
   }
