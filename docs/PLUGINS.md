@@ -88,8 +88,11 @@ calls that plugin's `onAction(ctx, cardId)`.
 export async function onAction(ctx, cardId) {
   // ctx.settings / ctx.getSecret(account) — identical to poll()'s ctx.
   // cardId — whatever your own poll() put in that button card's `id`.
-  // Throw to report a failure; there is no card to update on success,
-  // since a tap isn't new data the way a poll() result is.
+  // Throw to report a failure. On success, PluginRuntime re-runs your
+  // poll() and pushes its cards right away (Nexus ba0be49a) — this
+  // doesn't block the response to the badge, so there's nothing for
+  // onAction() itself to return or push; just do the real-world action
+  // and let your own poll() reflect the result on its next run.
 }
 ```
 

@@ -90,6 +90,32 @@ test('handleAction() routes a tapped card id to the plugin that last pushed it',
   assert.deepEqual(calls, ['btn-1']);
 });
 
+test('handleAction() pushes a fresh poll right after a successful action, not waiting for the next scheduled one', async () => {
+  resetConfigCacheForTests();
+  let pollCount = 0;
+  const button = {
+    id: 'ha-like-feed',
+    label: 'ha-like-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    credentialsSchema: [],
+    settingsSchema: [],
+    async poll() {
+      pollCount++;
+      return { cards: [{ id: 'btn-1', type: 'button', value: pollCount > 1 ? 'ON' : 'OFF' }] };
+    },
+    async onAction() {},
+  };
+  const runtime = new PluginRuntime([button]);
+  await runtime.runOnce('ha-like-feed'); // first poll, populates cardOwner
+  assert.equal(pollCount, 1);
+  await runtime.handleAction('btn-1');
+  // The refresh poll is fire-and-forget (handleAction must not block the
+  // badge's HTTP response on it) — give its microtask a turn to settle.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(pollCount, 2);
+});
+
 test('handleAction() throws on a card id no plugin has ever pushed', async () => {
   resetConfigCacheForTests();
   const runtime = new PluginRuntime([fakePlugin({ id: 'unrelated', cards: [] })]);

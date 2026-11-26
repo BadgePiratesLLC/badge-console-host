@@ -59,6 +59,44 @@ above. *(Releases aren't published yet — see "Status" below.)*
 **Not X/Twitter** — API access starts near $200/month, which doesn't fit
 a $45 device. See `docs/DECISIONS.md` before re-proposing it.
 
+## Status (2026-11-26)
+
+**Since the last status update (Nexus ba0be49a — "bookshelf HA button does
+nothing when tapped"):**
+
+- The Home Assistant button card no longer shows the literal string `"TAP"`
+  for every entity regardless of state. `poll()` now reads the action
+  entity's own current state and renders it: `"ON"`/`"OFF"` (bright amber
+  vs. dim grey tile) for a plain on/off entity, its raw state uppercased
+  for anything else (a cover's `"opening"`, say). Covered by
+  `test/plugins-homeassistant.test.mjs`.
+- A tap no longer waits for the plugin's own poll interval (up to 60s) to
+  show the new state: `PluginRuntime.handleAction()` now fires a fresh
+  poll+push immediately after a successful `onAction()`, without blocking
+  the HTTP response the badge is waiting on for its own pressed/success/
+  fail tile feedback. Covered by `test/plugin-runtime.test.mjs`.
+- `action-server.mjs` now logs every `/action` request it receives —
+  method+path for anything that doesn't match the route, the remote
+  address and outcome for a bad/missing token, a malformed body, a missing
+  id, and the handled result — not just a `handleAction()` throw. Jared's
+  debugging notes on this ticket found *zero* log lines for any tap,
+  successful or not, which this closes: from here on, "no log line at all"
+  means the request never reached this listener, not "logging didn't
+  cover that case."
+- **Not verified against this ticket's real hardware report.** Everything
+  above is proven by the mocked-`fetch`/mocked-runtime unit tests listed;
+  this dev environment has no network path to the actual House HA
+  instance, the actual paired badge, or the Windows machine (pid 31396)
+  Kevin's "book shelf button does not work" report named. Whether the
+  underlying reason the tap never arrived (open question going into this
+  ticket — wrong/stale callback IP, a firewall drop between the badge and
+  4174, or something else) is actually fixed can only be confirmed by
+  Kevin tapping the real tile and the new logging (this release's,
+  `ActionClient`'s Serial trace on the QACode_27 side) showing where in
+  the chain it lands. Quote the HA entity's `state` before and after the
+  tap, same as Carla's 64644fa0 QA did for the direct-API check, as the
+  closing proof.
+
 ## Status (2026-11-25)
 
 **Since the last status update:**

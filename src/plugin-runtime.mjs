@@ -21,8 +21,11 @@
 // when the badge reports a tap on one of that plugin's `type: 'button'`
 // cards (see action-server.mjs — the badge calls back over the LAN, the
 // runtime routes by which plugin last pushed that card id). Same ctx
-// shape as poll(). Throwing here just logs; there is no card to update
-// since a button tap isn't itself new data.
+// shape as poll(). Throwing here just logs and skips the refresh below.
+// On success, handleAction() re-runs that plugin's own poll() and pushes
+// its cards immediately (Nexus ba0be49a) rather than waiting for its
+// normal interval — a tapped light's state card should flip right away,
+// not up to a minute later.
 
 import { getSecret } from './credential-store.mjs';
 import { pushCards } from './badge-client.mjs';
@@ -142,6 +145,16 @@ export class PluginRuntime {
     };
     await plugin.onAction(ctx, cardId);
     log.info(`[${pluginId}] action "${cardId}" handled.`);
+
+    // Re-poll and push right away rather than leaving the tile on its
+    // pre-tap value until the plugin's own schedule comes around (up to
+    // 60s for Home Assistant) — Nexus ba0be49a: a tap should flip the
+    // tile's state within about a second. Fire-and-forget: the badge is
+    // waiting on this HTTP response for its own tap feedback, and that
+    // round trip shouldn't block on a second poll+push cycle.
+    this._poll(plugin, feedCfg, loadConfig()).catch((e) => {
+      log.error(`[${pluginId}] post-action refresh poll failed: ${e.message}`);
+    });
   }
 
   /** Start the recurring per-feed poll loop, one independent interval per enabled feed. */

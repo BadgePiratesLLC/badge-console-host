@@ -1,6 +1,6 @@
 {
   "name": "badge-console-host",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Host agent for BadgePirates desk console badges: polls feed plugins, serves a local config page on 127.0.0.1, and pushes generic cards to the badge over LAN.",
   "type": "module",
   "license": "UNLICENSED",

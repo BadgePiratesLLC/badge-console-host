@@ -71,15 +71,54 @@ test('poll() reads a state entity into one card', async () => {
   );
 });
 
-test('poll() emits a type: "button" card when actionEntityId is configured', async () => {
-  const result = await poll({
-    settings: { ...baseSettings, actionEntityId: 'light.office_accent', actionLabel: 'Office Light', actionService: 'light.toggle' },
-    getSecret: async () => 'tok',
-  });
-  assert.equal(result.cards.length, 1);
-  assert.equal(result.cards[0].type, 'button');
-  assert.equal(result.cards[0].id, 'ha-action-light_office_accent');
-  assert.equal(result.cards[0].title, 'Office Light');
+test('poll() emits a type: "button" card showing ON, bright, when the entity is on', async () => {
+  await withMockFetch(
+    async (url) => {
+      assert.match(url, /\/api\/states\/light\.office_accent$/);
+      return jsonResponse(200, { state: 'on', attributes: {} });
+    },
+    async () => {
+      const result = await poll({
+        settings: { ...baseSettings, actionEntityId: 'light.office_accent', actionLabel: 'Office Light', actionService: 'light.toggle' },
+        getSecret: async () => 'tok',
+      });
+      assert.equal(result.cards.length, 1);
+      assert.equal(result.cards[0].type, 'button');
+      assert.equal(result.cards[0].id, 'ha-action-light_office_accent');
+      assert.equal(result.cards[0].title, 'Office Light');
+      assert.equal(result.cards[0].value, 'ON');
+      assert.equal(result.cards[0].state, 'ok');
+      assert.equal(result.cards[0].color, '#F0A020');
+    },
+  );
+});
+
+test('poll() emits a type: "button" card showing OFF, dim, when the entity is off', async () => {
+  await withMockFetch(
+    async () => jsonResponse(200, { state: 'off', attributes: {} }),
+    async () => {
+      const result = await poll({
+        settings: { ...baseSettings, actionEntityId: 'light.office_accent', actionService: 'light.toggle' },
+        getSecret: async () => 'tok',
+      });
+      assert.equal(result.cards[0].value, 'OFF');
+      assert.equal(result.cards[0].state, 'neutral');
+      assert.equal(result.cards[0].color, '#3A3A3A');
+    },
+  );
+});
+
+test('poll() uppercases a non on/off state as-is rather than guessing ON/OFF', async () => {
+  await withMockFetch(
+    async () => jsonResponse(200, { state: 'opening', attributes: {} }),
+    async () => {
+      const result = await poll({
+        settings: { ...baseSettings, actionEntityId: 'cover.garage', actionService: 'cover.toggle' },
+        getSecret: async () => 'tok',
+      });
+      assert.equal(result.cards[0].value, 'opening');
+    },
+  );
 });
 
 test('poll() surfaces a rejected token (401) as a clear error, not a zero', async () => {

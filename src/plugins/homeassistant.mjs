@@ -87,15 +87,28 @@ export async function poll(ctx) {
   }
 
   if (ctx.settings.actionEntityId) {
+    // Nexus ba0be49a: the tile used to show the literal string "TAP" no
+    // matter what the entity was actually doing — a buyer had no way to
+    // tell on from off without leaving the house to look. Reading the
+    // entity's own state here (same call the state card above already
+    // makes for a different entity) turns this into a real status tile:
+    // "ON"/"OFF" as the value, and a bright vs. dim tile color as the
+    // at-a-glance signal, on top of the text. Entities whose state isn't
+    // on/off (a cover's "open"/"closed", say) still get their raw state
+    // uppercased rather than a wrong-looking ON/OFF guess.
+    const res = await haFetch(baseUrl, token, `/api/states/${encodeURIComponent(ctx.settings.actionEntityId)}`);
+    const entity = await res.json();
+    const isOn = entity.state === 'on';
+    const isOff = entity.state === 'off';
     cards.push({
       id: actionCardId(ctx.settings.actionEntityId),
       type: 'button',
-      title: ctx.settings.actionLabel || 'HA',
-      value: 'TAP',
+      title: ctx.settings.actionLabel || entity.attributes?.friendly_name || 'HA',
+      value: (isOn || isOff) ? entity.state.toUpperCase() : entity.state,
       subtitle: ctx.settings.actionService || 'light.toggle',
-      state: 'neutral',
+      state: isOn ? 'ok' : 'neutral',
       icon: 'lightbulb',
-      color: '#F0A020',
+      color: isOn ? '#F0A020' : '#3A3A3A', // bright amber on, dim grey off/unknown
       order: 6,
       updatedAt: now,
       ttlSeconds: 0, // a button doesn't go stale the way a reading does
