@@ -51,13 +51,31 @@ above. *(Releases aren't published yet — see "Status" below.)*
 | Anthropic | yes (Admin API key) | usage + spend today |
 | OpenAI | yes (Admin API key) | usage + spend today |
 | OpenClaw | no | reads this machine's own local invocation log |
-| Stocks | yes (Finnhub, free tier) | one symbol; free tier is 60 calls/min, enforced |
+| Stocks | no (Stooq/Yahoo); optional Finnhub key to use that instead | up to 3 symbols, each its own tile |
 | Sports | no | one followed team, via ESPN's public scoreboard API |
 | Weather | no | current conditions via api.weather.gov (US only) |
 | Home Assistant | yes (long-lived access token) | one state card + one optional button card that calls an HA service — see `docs/PLUGINS.md` "Button cards" |
 
 **Not X/Twitter** — API access starts near $200/month, which doesn't fit
 a $45 device. See `docs/DECISIONS.md` before re-proposing it.
+
+## Status (2026-11-25)
+
+**Since the last status update:**
+
+- The stocks plugin (Nexus c5941ef2) switched from Finnhub-required to
+  keyless by default — Stooq's CSV quote first, Yahoo's unofficial v8
+  chart JSON on any Stooq failure, Finnhub only if a key is stored. Up to
+  3 symbols, each its own tile. Mocked-`fetch` tests in
+  `test/plugins-stocks.test.mjs` cover the fallback chain, the
+  market-closed state, the staleness/never-blank contract, and the
+  optional-key override. **Verified live, not just mocked:** the exact
+  Stooq URL this ticket named currently 404s behind a JS challenge from
+  this network (real finding, not a guess — see `docs/DECISIONS.md`), so
+  in practice this plugin runs on the Yahoo path today; Yahoo's response
+  shape was confirmed live the same day. Not yet verified against a real
+  paired badge or from GAMINGCRAP's network (Gilfoyle's deploy, separate
+  from this session).
 
 ## Status (2026-11-21)
 
