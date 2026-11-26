@@ -84,6 +84,89 @@ function pillFor(feed) {
   return { text: 'pending', cls: 'off' };
 }
 
+// One input per configured symbol, not one comma-list field — editing a
+// slot's value replaces that slot (one API call with the full rejoined
+// list), it never appends. A second tile only shows up after an explicit
+// "+ Add" click (Nexus 281ee5a2: Kevin typed a new symbol expecting it to
+// change the built-in tile and got a second one instead).
+function renderSymbolListSetting(feed, setting) {
+  const wrap = document.createElement('div');
+  wrap.className = 'symbol-list';
+
+  const raw = feed.config.settings?.[setting.key] ?? setting.default ?? '';
+  const symbols = String(raw).split(',').map((s) => s.trim()).filter(Boolean);
+  if (symbols.length === 0) symbols.push('');
+  const max = setting.max || 3;
+
+  async function save(nextSymbols) {
+    const cleaned = nextSymbols.map((s) => s.trim().toUpperCase()).filter(Boolean);
+    await api(`/api/feeds/${feed.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: { [setting.key]: cleaned.join(',') } }),
+    });
+    loadState();
+  }
+
+  const label = document.createElement('div');
+  label.textContent = setting.label;
+  wrap.appendChild(label);
+
+  symbols.forEach((sym, i) => {
+    const slotRow = document.createElement('div');
+    slotRow.className = 'row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = sym;
+    input.placeholder = i === 0 ? 'e.g. AAPL' : 'another symbol';
+    input.dataset.role = 'symbol-slot';
+    input.addEventListener('change', () => {
+      const next = [...symbols];
+      next[i] = input.value;
+      save(next);
+    });
+    slotRow.appendChild(input);
+    if (symbols.length > 1) {
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', () => {
+        const next = symbols.filter((_, j) => j !== i);
+        save(next.length ? next : ['']);
+      });
+      slotRow.appendChild(removeBtn);
+    }
+    wrap.appendChild(slotRow);
+  });
+
+  if (symbols.filter(Boolean).length < max) {
+    const addRow = document.createElement('div');
+    addRow.className = 'row';
+    const addBtn = document.createElement('button');
+    addBtn.textContent = '+ Add another symbol';
+    addBtn.addEventListener('click', () => {
+      // Insert one blank slot locally — nothing is saved (so no tile is
+      // added) until the buyer actually types a symbol into it.
+      const slotRow = document.createElement('div');
+      slotRow.className = 'row';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'another symbol';
+      input.addEventListener('change', () => {
+        const current = String(feed.config.settings?.[setting.key] ?? setting.default ?? '')
+          .split(',').map((s) => s.trim()).filter(Boolean);
+        save([...current, input.value]);
+      });
+      slotRow.appendChild(input);
+      wrap.insertBefore(slotRow, addRow);
+      addRow.remove();
+    });
+    addRow.appendChild(addBtn);
+    wrap.appendChild(addRow);
+  }
+
+  return wrap;
+}
+
 function renderFeed(feed, sortedFeeds, index) {
   const div = document.createElement('div');
   div.className = 'feed';
@@ -165,6 +248,10 @@ function renderFeed(feed, sortedFeeds, index) {
   body.appendChild(intervalRow);
 
   for (const setting of feed.settingsSchema) {
+    if (setting.type === 'stock-symbols') {
+      body.appendChild(renderSymbolListSetting(feed, setting));
+      continue;
+    }
     const row = document.createElement('div');
     row.className = 'row';
     const val = feed.config.settings?.[setting.key] ?? setting.default ?? '';

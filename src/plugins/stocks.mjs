@@ -34,7 +34,13 @@ export const credentialsSchema = [
   },
 ];
 export const settingsSchema = [
-  { key: 'symbols', label: 'Ticker symbols (comma-separated, up to 3)', type: 'text', default: 'AAPL' },
+  // type 'stock-symbols' (Nexus 281ee5a2): one input per symbol, editing a
+  // slot replaces that symbol — the buyer must click "+ Add" to get a
+  // second tile, instead of a single comma-list field silently growing
+  // into N tiles the moment they typed a comma. Storage stays the same
+  // comma-joined string app.js's generic text-input path used, so existing
+  // configs load unchanged.
+  { key: 'symbols', label: 'Ticker symbol', type: 'stock-symbols', default: 'AAPL', max: 3 },
 ];
 
 const USER_AGENT = 'Mozilla/5.0 (compatible; badge-console-host/1.0; +https://github.com/BadgePiratesLLC/badge-console-host)';
