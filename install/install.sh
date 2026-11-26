@@ -25,10 +25,10 @@ curl -fsSL "$url" -o "$INSTALL_DIR/badge-console-host"
 chmod +x "$INSTALL_DIR/badge-console-host"
 
 echo "Registering to start on login…"
-BCH_SEA_BUILD=1 "$INSTALL_DIR/badge-console-host" --install-autostart
+"$INSTALL_DIR/badge-console-host" --install-autostart
 
 echo "Starting now…"
-BCH_SEA_BUILD=1 nohup "$INSTALL_DIR/badge-console-host" >/dev/null 2>&1 &
+nohup "$INSTALL_DIR/badge-console-host" >/dev/null 2>&1 &
 
 echo
 echo "Done. Open http://127.0.0.1:4173 in your browser to finish setup."

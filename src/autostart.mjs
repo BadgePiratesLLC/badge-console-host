@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import sea from 'node:sea';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -21,8 +22,10 @@ function binaryInvocation() {
   // Prefer the packaged single-file binary if this process *is* one
   // (see scripts/build-sea.mjs); otherwise fall back to `node <entry>`
   // so autostart also works from a plain `npm start` dev checkout.
-  const isPkgBuild = process.env.BCH_SEA_BUILD === '1';
-  if (isPkgBuild) return { command: process.execPath, args: [] };
+  // sea.isSea() is the live signal (true for the actual shipped exe,
+  // regardless of how it was launched) rather than relying on the
+  // install scripts remembering to set an env var correctly.
+  if (sea.isSea()) return { command: process.execPath, args: [] };
   const entry = path.join(path.dirname(new URL(import.meta.url).pathname), 'server.mjs');
   return { command: process.execPath, args: [entry] };
 }

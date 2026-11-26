@@ -16,8 +16,13 @@ here first.
 ## Zero npm dependencies
 
 Everything in `src/` uses only Node built-ins (`http`, `dgram`, `fs`,
-`child_process`, global `fetch`). Two reasons, both from the ticket
-directly:
+`child_process`, global `fetch`). `package.json` does have one
+`devDependency`, `esbuild` — it only runs inside `scripts/build-sea.mjs`
+at build time (to bundle the ESM source to the single CJS file Node's SEA
+support requires; see "Single-executable packaging" below) and never
+ships inside the resulting binary or anywhere a buyer's own code would
+load it. The two reasons below are both about what the *product* depends
+on, which this doesn't change:
 
 1. **"It is inspectable, which matters for a security-conscious buyer."**
    A buyer auditing this repo should not also have to audit a bundled
@@ -129,23 +134,55 @@ machine in this repo (dev environment is macOS-only); the GitHub Actions
 release workflow's `windows-latest` runner is where this should get its
 first real exercise.
 
-## Single-executable packaging: verified approach, unverified locally
+## Single-executable packaging: real bugs found, now verified locally too
 
-`scripts/build-sea.mjs` follows Node's documented Single Executable
-Application flow (`--experimental-sea-config` + `postject` injection),
-which is what every current SEA tutorial and `.github/workflows/release.yml`
-target. **This could not be exercised locally**: this repo's dev sandbox
-only has Homebrew's Node 26.7.0 build available, and that build reports
-"Single executable application is disabled" for *both* the classic
-`--experimental-sea-config` flag and the newer Node 26 `--build-sea` flag
-— Homebrew's formula appears to compile Node with SEA support stripped,
-a packaging choice on Homebrew's side, not a bug in this script. Official
-nodejs.org-distributed builds (which is what `actions/setup-node` installs
-in CI, and what most buyers who don't use Homebrew would have) do support
-it. **First real verification of `scripts/build-sea.mjs` should happen in
-CI** (`.github/workflows/release.yml`'s 3-runner matrix), not by trusting
-this note — check the workflow's own run history before assuming this
-works.
+The note that used to live here said this "could not be exercised
+locally" because Homebrew's Node has SEA support stripped, and that first
+real verification would have to happen in CI. That was true as far as it
+went, but it let two releases (v0.1.1, v0.1.2) ship with a SEA that
+crashed on first launch anyway (Nexus bcae3a08, filed by Gilfoyle off a
+real GAMINGCRAP install) — "the build step exits 0" and "the binary
+actually starts" turned out to be two different claims, and CI before
+this fix only checked the first one. Three real bugs, all fixed together:
+
+1. **SEA main was raw ESM.** Node's SEA support only runs a CommonJS
+   main; `--experimental-sea-config`'s `main` pointed straight at
+   `src/server.mjs` (`type: module`), so every release exe hit `Cannot
+   use import statement outside a module` and exited immediately.
+   `scripts/build-sea.mjs` now bundles `src/sea-entry.mjs` to a single CJS
+   file with esbuild (devDependency only — never shipped, never a
+   dependency of the actual product; see "Zero npm dependencies" below)
+   before generating the SEA blob.
+2. **A SEA doesn't follow imports *or* fs reads out of the one file.**
+   Bundling fixes the plugin/module imports, but `web/` (the config
+   page's static HTML/JS/CSS, read via `fs` from `__dirname`) was never
+   going to be sitting on disk next to a single-file exe. It now rides
+   along as embedded SEA `assets` (`web/index.html`, `web/app.js`,
+   `web/style.css`), fetched at runtime via `node:sea`'s `getAsset()`
+   instead of `fs` when `sea.isSea()` is true (see `server.mjs`'s
+   `serveStatic`).
+3. **The direct-run guard never matched on Windows, SEA or not.**
+   `import.meta.url === \`file://${process.argv[1]}\`` builds a
+   malformed URL on Windows (no leading `file:///`, backslashes left raw)
+   and `argv[1]` isn't even the running script inside a SEA. Fixed with
+   `pathToFileURL(process.argv[1]).href` for the real `node
+   src/server.mjs` case, plus a separate `src/sea-entry.mjs` that calls
+   the extracted `runCli()` unconditionally for the SEA case, which never
+   needs to self-detect at all.
+
+**Locally verified this time**, not just asserted: this dev sandbox's own
+Homebrew Node still has SEA stripped, same as before, but a real
+nodejs.org-distributed Node 22 binary downloaded straight from
+nodejs.org/dist (not npm, not Homebrew) runs the full
+`scripts/build-sea.mjs` pipeline end-to-end, and the resulting
+`dist/badge-console-host` binary, run standalone, serves `GET
+/api/state` (200, real feed list) and `GET /` (200, the actual
+`web/index.html`, `/style.css`, `/app.js` — all from embedded SEA assets,
+zero files on disk next to the binary) correctly. `.github/workflows/
+release.yml`'s build job now also runs `scripts/sea-smoke.mjs` against
+the literal artifact it's about to upload, on all three runners, so a
+future regression here fails the release build instead of shipping quietly
+like v0.1.1/v0.1.2 did.
 
 ## Known trade-off: secret values briefly touch argv on macOS/Linux
 

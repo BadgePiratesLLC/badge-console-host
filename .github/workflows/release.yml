@@ -34,6 +34,13 @@ jobs:
         with:
           node-version: '22'
       - run: node scripts/build-sea.mjs
+      # `node scripts/build-sea.mjs` exiting 0 only proves the build step
+      # ran; it does not prove the resulting binary actually starts. Both
+      # v0.1.1 and v0.1.2 passed this job and still shipped a release exe
+      # that crashed on first launch (Nexus bcae3a08) — this step runs the
+      # literal artifact this job is about to upload and hits it over HTTP
+      # the way a real buyer's browser would.
+      - run: node scripts/sea-smoke.mjs dist/${{ matrix.bin }}
       - run: node --test
       - uses: actions/upload-artifact@v4
         with:

@@ -15,7 +15,6 @@ $exePath = Join-Path $installDir 'badge-console-host.exe'
 Write-Host "Downloading $url"
 Invoke-WebRequest -Uri $url -OutFile $exePath -UseBasicParsing
 
-$env:BCH_SEA_BUILD = '1'
 Write-Host 'Registering to start on login...'
 & $exePath --install-autostart
 

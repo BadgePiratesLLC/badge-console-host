@@ -7,7 +7,8 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import sea from 'node:sea';
 import { loadConfig, saveConfig, updateConfig, getFeedConfig } from './config-store.mjs';
 import { setSecret, deleteSecret, hasSecret } from './credential-store.mjs';
 import { exchangePairCode, setBadgeToken } from './badge-client.mjs';
@@ -24,7 +25,18 @@ import * as sports from './plugins/sports.mjs';
 import * as weather from './plugins/weather.mjs';
 import * as homeassistant from './plugins/homeassistant.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// esbuild empties out import.meta (see scripts/build-sea.mjs) when
+// bundling this file to CJS for the SEA build, so fileURLToPath(undefined)
+// would throw at module-load time there. __dirname/WEB_DIR are only ever
+// consulted by serveStatic()'s non-SEA fallback branch, which the SEA
+// build never reaches (sea.isSea() is true there) — the catch just needs
+// to not throw, not produce a meaningful path, for that build.
+let __dirname;
+try {
+  __dirname = path.dirname(fileURLToPath(import.meta.url));
+} catch {
+  __dirname = process.cwd();
+}
 const WEB_DIR = path.join(__dirname, 'web');
 const SERVICE = 'badge-console-host';
 const ACTION_PORT = Number(process.env.BADGE_CONSOLE_ACTION_PORT || 4174);
@@ -50,11 +62,25 @@ async function readJsonBody(req) {
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 
 function serveStatic(req, res, pathname) {
-  const rel = pathname === '/' ? '/index.html' : pathname;
+  const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  if (rel.includes('..')) { res.writeHead(403); res.end(); return true; }
+  const ext = path.extname(rel);
+
+  // A SEA binary doesn't have web/ sitting on disk next to it (a SEA
+  // doesn't follow fs reads out of the single file any more than it
+  // follows imports) — scripts/build-sea.mjs embeds these as SEA assets
+  // instead, so serve from there when running as one.
+  if (sea.isSea()) {
+    let data;
+    try { data = sea.getAsset(`web/${rel}`); } catch { return false; }
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.end(Buffer.from(data));
+    return true;
+  }
+
   const filePath = path.join(WEB_DIR, rel);
   if (!filePath.startsWith(WEB_DIR)) { res.writeHead(403); res.end(); return true; }
   if (!fs.existsSync(filePath)) return false;
-  const ext = path.extname(filePath);
   res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
   fs.createReadStream(filePath).pipe(res);
   return true;
@@ -199,13 +225,27 @@ export function stop() {
   ]);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+export async function runCli() {
   if (process.argv.includes('--install-autostart')) {
     const { installAutostart } = await import('./autostart.mjs');
-    installAutostart()
+    return installAutostart()
       .then((r) => log.info(`Autostart installed via ${r.method} (${r.path}).`))
       .catch((e) => { log.error(`Autostart install failed: ${e.message}`); process.exitCode = 1; });
-  } else {
-    start();
   }
+  return start();
+}
+
+// `import.meta.url === \`file://${process.argv[1]}\`` (the original check
+// here) never matches on Windows — a file:// URL needs file:///C:/... with
+// forward slashes, not the raw backslashed path Windows hands back in
+// argv[1] — so plain `node src/server.mjs` never actually started on
+// Windows even outside a SEA. pathToFileURL() builds the URL the correct,
+// platform-aware way instead of string-concatenating it.
+//
+// This also never matches inside a SEA, since argv[1] there isn't this
+// script's path at all — intentional, not a gap: scripts/build-sea.mjs
+// points the SEA at a separate src/sea-entry.mjs that calls runCli()
+// unconditionally.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runCli();
 }
