@@ -14,15 +14,19 @@ button { padding: 0.4rem 0.8rem; cursor: pointer; }
 .result { font-size: 0.85rem; margin-top: 0.4rem; }
 .feed { border-top: 1px solid #8883; padding: 0.75rem 0; }
 .feed:first-child { border-top: none; }
-.feed-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.feed-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; cursor: pointer; }
+.feed-head input, .feed-head button { cursor: default; }
 .order-btns { display: flex; flex-direction: column; gap: 0.1rem; }
 .order-btns button { padding: 0 0.4rem; font-size: 0.7rem; line-height: 1.2; }
 .feed-name { font-weight: 600; }
+.chevron { display: inline-block; transition: transform 0.15s; color: #888; font-size: 0.75rem; }
+.feed.open .chevron { transform: rotate(90deg); }
 .feed-desc { font-size: 0.85rem; color: #666; margin: 0.2rem 0 0.5rem; }
 .feed-body { display: none; margin-top: 0.5rem; }
 .feed.open .feed-body { display: block; }
 .pill { font-size: 0.75rem; padding: 0.1rem 0.5rem; border-radius: 999px; background: #8882; }
 .pill.ok { background: #1a7f371a; color: #1a7f37; }
 .pill.err { background: #cf222e1a; color: #cf222e; }
+.pill.warn { background: #9a67001a; color: #9a6700; }
 .pill.off { background: #8882; color: #666; }
 code { background: #8882; padding: 0.1rem 0.3rem; border-radius: 4px; }

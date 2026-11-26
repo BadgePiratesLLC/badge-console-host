@@ -11,7 +11,7 @@ export const label = 'Weather';
 export const description = 'Current conditions from the National Weather Service — free, no key, US locations only.';
 export const defaultIntervalSeconds = 600;
 export const minIntervalSeconds = 120;
-export const needsCredentials = [];
+export const credentialsSchema = [];
 export const settingsSchema = [
   { key: 'lat', label: 'Latitude', type: 'text', default: '39.0997' },
   { key: 'lon', label: 'Longitude', type: 'text', default: '-94.5786' },

@@ -24,7 +24,7 @@ export const label = 'OpenClaw activity';
 export const description = 'Local invocation count from this machine’s own OpenClaw log. No credential, no network call.';
 export const defaultIntervalSeconds = 60;
 export const minIntervalSeconds = 15;
-export const needsCredentials = [];
+export const credentialsSchema = [];
 export const settingsSchema = [];
 
 const LOG_PATH = path.join(os.homedir(), '.openclaw', 'state', 'nexus_invocations.jsonl');

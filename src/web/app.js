@@ -69,8 +69,16 @@ async function moveFeed(sortedFeeds, id, direction) {
   loadState();
 }
 
+function missingRequiredCredential(feed) {
+  return feed.credentialsSchema.some((cred) => cred.required && !feed.credentials[cred.account]);
+}
+
 function pillFor(feed) {
   if (!feed.config.enabled) return { text: 'off', cls: 'off' };
+  // A feed that only lacks its key can't have succeeded yet either, so this
+  // takes priority over the error pill below — the fix is "add a key", not
+  // "something's broken".
+  if (missingRequiredCredential(feed)) return { text: 'needs key', cls: 'warn' };
   if (feed.status.lastError) return { text: 'error', cls: 'err' };
   if (feed.status.lastSuccess) return { text: 'ok', cls: 'ok' };
   return { text: 'pending', cls: 'off' };
@@ -80,6 +88,10 @@ function renderFeed(feed, sortedFeeds, index) {
   const div = document.createElement('div');
   div.className = 'feed';
   const pill = pillFor(feed);
+  // Auto-expand anything that needs the buyer's attention — a collapsed row
+  // is exactly how "add one on the Feeds page" ends up pointing at nothing
+  // visible (Nexus 31f026ef). Healthy/off feeds stay collapsed by default.
+  if (pill.cls === 'err' || pill.cls === 'warn') div.classList.add('open');
 
   const head = document.createElement('div');
   head.className = 'feed-head';
@@ -89,6 +101,7 @@ function renderFeed(feed, sortedFeeds, index) {
       <button data-role="move-down" title="Move down in display order" ${index === sortedFeeds.length - 1 ? 'disabled' : ''}>&darr;</button>
     </div>
     <div>
+      <span class="chevron">&#9656;</span>
       <span class="feed-name">${feed.label}</span>
       <span class="pill ${pill.cls}">${pill.text}</span>
     </div>
@@ -125,7 +138,7 @@ function renderFeed(feed, sortedFeeds, index) {
   statusLine.textContent = feed.status.lastError
     ? `Last error (${timeAgo(feed.status.lastError.at)}): ${feed.status.lastError.message}`
     : `Last success: ${timeAgo(feed.status.lastSuccess)} · next poll: ${timeUntil(feed.status.nextPollAt)}`;
-  statusLine.classList.add(feed.status.lastError ? 'err' : 'ok');
+  statusLine.classList.add(pill.cls === 'warn' ? 'warn' : feed.status.lastError ? 'err' : 'ok');
 
   const intervalRow = document.createElement('div');
   intervalRow.className = 'row';
@@ -162,12 +175,17 @@ function renderFeed(feed, sortedFeeds, index) {
     body.appendChild(row);
   }
 
-  for (const account of feed.needsCredentials) {
+  for (const cred of feed.credentialsSchema) {
+    const account = cred.account;
     const row = document.createElement('div');
     row.className = 'row';
     const have = feed.credentials[account];
+    const label = cred.label || account;
+    const helpLink = cred.helpUrl
+      ? ` — <a href="${cred.helpUrl}" target="_blank" rel="noopener">get a key</a>`
+      : '';
     row.innerHTML = `
-      <label>${account} <input type="password" placeholder="${have ? 'stored — enter a new value to replace' : 'paste key here'}" data-account="${account}"></label>
+      <label>${label}${helpLink} <input type="password" placeholder="${have ? 'stored — enter a new value to replace' : 'paste key here'}" data-account="${account}"></label>
       <button data-role="save-cred">${have ? 'Replace' : 'Save'}</button>
       ${have ? '<button data-role="clear-cred">Clear</button>' : ''}
     `;

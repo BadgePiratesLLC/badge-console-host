@@ -12,7 +12,14 @@ export const label = 'Anthropic usage';
 export const description = 'Token usage and spend today, via the Anthropic Admin API.';
 export const defaultIntervalSeconds = 300;
 export const minIntervalSeconds = 60;
-export const needsCredentials = ['anthropic-admin-key'];
+export const credentialsSchema = [
+  {
+    account: 'anthropic-admin-key',
+    label: 'Anthropic Admin API key',
+    helpUrl: 'https://console.anthropic.com/settings/admin-keys',
+    required: true,
+  },
+];
 export const settingsSchema = [];
 
 const API_BASE = 'https://api.anthropic.com/v1';

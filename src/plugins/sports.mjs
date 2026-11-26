@@ -12,7 +12,7 @@ export const label = 'Team score';
 export const description = 'Next/last game and current record for one followed team, via ESPN’s public scoreboard API (unofficial — no published SLA).';
 export const defaultIntervalSeconds = 300;
 export const minIntervalSeconds = 60;
-export const needsCredentials = [];
+export const credentialsSchema = [];
 export const settingsSchema = [
   { key: 'sport', label: 'Sport path (e.g. football/nfl, basketball/nba)', type: 'text', default: 'football/nfl' },
   { key: 'team', label: 'Team abbreviation (e.g. KC, LAL)', type: 'text', default: 'KC' },

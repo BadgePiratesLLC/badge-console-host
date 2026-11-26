@@ -13,7 +13,14 @@ export const label = 'Home Assistant';
 export const description = 'One state card from a sensor/entity, and one optional button card that calls an HA service.';
 export const defaultIntervalSeconds = 60;
 export const minIntervalSeconds = 15;
-export const needsCredentials = ['token'];
+export const credentialsSchema = [
+  {
+    account: 'token',
+    label: 'Home Assistant long-lived access token',
+    helpUrl: null, // generated on the buyer's own HA instance, under their profile — no central signup page to link to
+    required: true,
+  },
+];
 export const settingsSchema = [
   { key: 'baseUrl', label: 'Home Assistant base URL', type: 'text', default: 'http://homeassistant.local:8123' },
   { key: 'stateEntityId', label: 'State card: entity id (blank to skip)', type: 'text', default: '' },
