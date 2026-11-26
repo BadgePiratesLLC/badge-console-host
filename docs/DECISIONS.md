@@ -260,3 +260,54 @@ empty-array probe push for exactly that). Not needed anymore — a 200 from
 token, so there's nothing left to probe for. `pushCards()` still surfaces
 a bad/expired token plainly on the next real push if something ever does
 go wrong downstream.
+
+## Stocks plugin: keyless by default, Stooq's named URL verified dead on arrival
+
+Nexus c5941ef2 (Kevin: *"can we not just do a scrap to get stock values?
+... no API key and no signup"*). The v1 stocks plugin (Nexus c7aa8e00)
+required a Finnhub key before it would even attempt a poll; this ticket
+flips the default to free/keyless and keeps Finnhub as an opt-in override
+— if a key is stored, every configured symbol uses Finnhub exclusively
+instead of the free path, matching the ticket's "optional 'use my own
+key'" ask.
+
+**Verified live 2026-11-25, before writing any code against it:** the
+exact Stooq URL this ticket named
+(`stooq.com/q/l/?s=aapl.us&f=sd2t2ohlcvp&h&e=csv`) 404s from this
+network. The real response isn't a data gap or a renamed field — it's a
+JS proof-of-work challenge page (`"This site requires JavaScript to
+verify your browser"`) in front of `stooq.com/q/d/l/...` too, so this
+isn't specific to the quote endpoint. There's no header or key that gets
+a plain server-side `fetch` past that. Rather than drop Stooq, it's still
+coded as the first attempt in `fetchQuote()` — cheap, still keyless, and
+the challenge may differ by network/IP or lift later — with every error
+(404, challenge HTML, timeout) falling through to Yahoo's unofficial
+`v8/finance/chart` endpoint, confirmed live the same day:
+`meta.regularMarketPrice` and `meta.previousClose` are real fields on
+that response; there is no `meta.marketState` on it, so market-open/closed
+is computed independently (`isMarketOpen()`, a plain America/New_York
+9:30-16:00 Mon-Fri check with no holiday calendar) rather than trusted
+from the provider. In practice, right now, every poll runs the Yahoo path.
+
+**Poll-interval requirement vs. the existing single-interval scheduler:**
+`plugin-runtime.mjs`'s scheduler runs one fixed `setInterval` per feed;
+making that market-hours-aware for one plugin would have meant changing
+shared scheduling code for every other feed too. Instead `defaultIntervalSeconds`
+stays at the market-hours floor (300s) and the plugin self-throttles
+inside `poll()`: a per-symbol `nextAllowedFetchAt` map gates whether a
+given runtime tick actually hits the network (5 min open, 30 min closed,
+and a 15-minute minimum back-off on any 429 from Stooq/Yahoo/Finnhub,
+regardless of market hours) — the runtime can tick as often as the buyer
+sets it, but the upstream call rate stays bounded.
+
+**"Never blank, show warn when stale" vs. "show closed with last close":**
+these are two different tile states and the firmware's `CardState` enum
+(`Ok | Warn | Err | Neutral` — confirmed in QACode_27's `CardStore.h`) only
+has one spare slot for both, so they can't both be distinct colors by
+inventing a new state the badge doesn't know about. Split the meaning
+instead: `state: 'warn'` is reserved for "a fetch failed and this number
+might be stale," `state: 'neutral'` means "fetch succeeded, market's just
+shut, this is the real last close," and `state: 'ok'` means "fresh,
+market's open." Up/down day, which the v1 plugin encoded as `ok`/`warn`
+(overloading `warn` to mean "red," not "stale"), moved to the icon alone
+(`stock-up`/`stock-down`) so `warn` means one thing.
