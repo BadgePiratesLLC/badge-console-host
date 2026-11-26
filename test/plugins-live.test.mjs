@@ -34,12 +34,21 @@ test('weather plugin returns a real current-conditions card for a US location', 
   assert.ok(card.subtitle.length > 0);
 });
 
-test('sports plugin returns a real team record card', { timeout: 15000 }, async () => {
+test('sports plugin returns a live score, next game, or last result — never the season record (Nexus 365ba2c6)', { timeout: 15000 }, async () => {
   const result = await pollSports({ settings: { sport: 'football/nfl', team: 'KC' }, getSecret: async () => null });
   assert.equal(result.cards.length, 1);
   const card = result.cards[0];
   assert.equal(card.id, 'sports-kc');
-  assert.match(card.value, /^\d+-\d+$/, 'record should look like "W-L"');
+  // Live score ("20-17"), last result ("W 24-17" / "L 17-24" / "T 20-20"),
+  // or next game ("Sun 12:00") — whichever ESPN's current team state is at
+  // test time. The season record this used to show ("8-2") lives in
+  // `subtitle` now, not here.
+  assert.match(
+    card.value,
+    /^(\d+-\d+|[WLT] \d+-\d+|[A-Za-z]{3} \d{2}:\d{2})$/,
+    `value "${card.value}" should be a live score, W/L result, or next-game time`,
+  );
+  assert.match(card.subtitle, /\d+-\d+|—/, 'the season record should still be reachable, in the subtitle');
 });
 
 test('sports plugin surfaces an error (not a zero) for a bogus team', { timeout: 15000 }, async () => {

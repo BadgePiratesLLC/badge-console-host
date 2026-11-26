@@ -18,6 +18,31 @@ export const settingsSchema = [
   { key: 'team', label: 'Team abbreviation (e.g. KC, LAL)', type: 'text', default: 'KC' },
 ];
 
+// "2026-11-29T18:00Z" -> "Sun 12:00" (mockup's next-game format) — day
+// abbreviation + local clock time, no date-library dependency for one call
+// site.
+function formatNextGame(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${days[d.getDay()]} ${hh}:${mm}`;
+}
+
+// Picks our side out of a completed game's two competitors by abbreviation
+// match, and formats "W 24-17" / "L 17-24" (Nexus 365ba2c6: the tile's main
+// value was the season record, "the last result" ticket AC means W/L + our
+// score first, not raw away-home order).
+function formatResult(home, away, abbr) {
+  const us = home?.team?.abbreviation === abbr ? home : away;
+  const opp = us === home ? away : home;
+  const usScore = Number(us?.score ?? 0);
+  const oppScore = Number(opp?.score ?? 0);
+  const letter = usScore > oppScore ? 'W' : usScore < oppScore ? 'L' : 'T';
+  return { value: `${letter} ${usScore}-${oppScore}`, opponent: opp?.team?.abbreviation };
+}
+
 export async function poll(ctx) {
   const sport = ctx.settings.sport || 'football/nfl';
   const team = (ctx.settings.team || 'KC').toLowerCase();
@@ -40,8 +65,12 @@ export async function poll(ctx) {
   const abbr = t.abbreviation || team.toUpperCase();
 
   let title = abbr;
-  let value = record;
-  let subtitle = 'no upcoming game found';
+  // Nexus 365ba2c6: the tile's main value used to be the season record
+  // ("8-2") year-round — the ticket's ask is live score / next game / last
+  // result there instead, with the record demoted to the detail view
+  // (subtitle, shown in CardApp's detail body under the big value).
+  let value = '—';
+  let subtitle = `no upcoming game found • ${record}`;
   let state = 'neutral';
 
   if (comp) {
@@ -49,16 +78,19 @@ export async function poll(ctx) {
     const home = comp.competitors?.find((c) => c.homeAway === 'home');
     const away = comp.competitors?.find((c) => c.homeAway === 'away');
     if (status?.state === 'in') {
-      value = `${away?.score ?? '0'}-${home?.score ?? '0'}`;
+      const { value: resultValue } = formatResult(home, away, abbr);
+      value = resultValue.replace(/^[WLT] /, ''); // score only — game isn't decided yet
       title = `${abbr} ${status.period ? `Q${status.period}` : 'LIVE'}`;
-      subtitle = `${away?.team?.abbreviation} @ ${home?.team?.abbreviation} (${status.shortDetail})`;
+      subtitle = `${away?.team?.abbreviation} @ ${home?.team?.abbreviation} (${status.shortDetail}) • ${record}`;
       state = 'ok';
     } else if (status?.state === 'post') {
-      value = `${away?.score ?? '0'}-${home?.score ?? '0'}`;
-      subtitle = `Final: ${away?.team?.abbreviation} ${away?.score} – ${home?.score} ${home?.team?.abbreviation}`;
+      const { value: resultValue, opponent } = formatResult(home, away, abbr);
+      value = resultValue;
+      subtitle = `Final vs ${opponent || '?'} • ${record}`;
       state = 'neutral';
     } else {
-      subtitle = `${away?.team?.abbreviation} @ ${home?.team?.abbreviation}, ${status?.shortDetail || 'scheduled'}`;
+      value = formatNextGame(event?.date) || record;
+      subtitle = `${away?.team?.abbreviation} @ ${home?.team?.abbreviation}, ${status?.shortDetail || 'scheduled'} • ${record}`;
       state = 'neutral';
     }
   } else {
@@ -82,9 +114,9 @@ export async function poll(ctx) {
         if (lastComp) {
           const home = lastComp.competitors?.find((c) => c.homeAway === 'home');
           const away = lastComp.competitors?.find((c) => c.homeAway === 'away');
-          const opponent = home?.team?.abbreviation === abbr ? away?.team?.abbreviation : home?.team?.abbreviation;
-          value = `${away?.score ?? '0'}-${home?.score ?? '0'}`;
-          subtitle = `Final vs ${opponent || '?'}`;
+          const { value: resultValue, opponent } = formatResult(home, away, abbr);
+          value = resultValue;
+          subtitle = `Final vs ${opponent || '?'} • ${record}`;
         }
       }
     } catch {
