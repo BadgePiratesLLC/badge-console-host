@@ -43,6 +43,21 @@ function formatResult(home, away, abbr) {
   return { value: `${letter} ${usScore}-${oppScore}`, opponent: opp?.team?.abbreviation };
 }
 
+// Nexus ed8273ef: Jared's icon-set spec explicitly asks for "matching ball
+// icons per league: basketball, baseball, hockey puck" — this plugin used to
+// hardcode icon: 'football' regardless of `sport`, so a basketball/baseball/
+// hockey team's tile silently showed a football. Keyed on the sport path's
+// first segment, matching the settings field's own documented examples
+// ('football/nfl', 'basketball/nba'); anything unrecognized still falls back
+// to 'football' rather than an icon-less tile.
+function iconForSport(sport) {
+  const league = (sport || '').split('/')[0].toLowerCase();
+  if (league === 'basketball') return 'basketball';
+  if (league === 'baseball') return 'baseball';
+  if (league === 'hockey') return 'hockey';
+  return 'football';
+}
+
 export async function poll(ctx) {
   const sport = ctx.settings.sport || 'football/nfl';
   const team = (ctx.settings.team || 'KC').toLowerCase();
@@ -147,12 +162,25 @@ export async function poll(ctx) {
         unit: '',
         subtitle,
         state,
-        icon: 'football',
+        icon: iconForSport(sport),
         color: '#D6333F',
+        editLabel: 'Team',
+        editValue: team.toUpperCase(),
         order: 1,
         updatedAt: now,
         ttlSeconds: 1800,
       },
     ],
   };
+}
+
+// Nexus 281ee5a2 slice 2: this feed is single-instance (one followed
+// team), so editing its tile's "Team" field just replaces the setting —
+// no instance list to index into, unlike stocks. The id is derived from
+// the team abbreviation, so it changes too (sports-kc -> sports-lal),
+// hence newCardId.
+export async function onEditValue(ctx, cardId, newValue) {
+  const next = String(newValue || '').trim().toUpperCase();
+  if (!next) throw new Error('Team abbreviation cannot be blank.');
+  return { settings: { ...ctx.settings, team: next }, newCardId: `sports-${next.toLowerCase()}` };
 }
