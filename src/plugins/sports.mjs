@@ -64,7 +64,20 @@ export async function poll(ctx) {
   const record = t.record?.items?.find((i) => i.type === 'total')?.summary || '—';
   const abbr = t.abbreviation || team.toUpperCase();
 
-  let title = abbr;
+  // Nexus 7175f3fc item 6: "KC" told Kevin nothing at a glance without
+  // already knowing it means the Chiefs — ESPN's team-summary response
+  // carries the actual name (t.team.name, e.g. "Chiefs") this endpoint was
+  // already fetching, just never used. The badge can't measure pixel width
+  // (it only sees whatever string this sends), so this falls back to the
+  // abbreviation above a conservative character count instead of a true
+  // fit check — CardApp's own auto-fit/ellipsis (fitTitleText()) is still
+  // there as a safety net if a borderline name still doesn't fit.
+  const MAX_SHORT_NAME_LEN = 10;
+  const shortName = (t.name || '').toUpperCase();
+  const abbrUpper = abbr.toUpperCase();
+  const teamLabel = shortName && shortName.length <= MAX_SHORT_NAME_LEN ? shortName : abbrUpper;
+
+  let title = teamLabel;
   // Nexus 365ba2c6: the tile's main value used to be the season record
   // ("8-2") year-round — the ticket's ask is live score / next game / last
   // result there instead, with the record demoted to the detail view
@@ -80,7 +93,7 @@ export async function poll(ctx) {
     if (status?.state === 'in') {
       const { value: resultValue } = formatResult(home, away, abbr);
       value = resultValue.replace(/^[WLT] /, ''); // score only — game isn't decided yet
-      title = `${abbr} ${status.period ? `Q${status.period}` : 'LIVE'}`;
+      title = `${teamLabel} ${status.period ? `Q${status.period}` : 'LIVE'}`;
       subtitle = `${away?.team?.abbreviation} @ ${home?.team?.abbreviation} (${status.shortDetail}) • ${record}`;
       state = 'ok';
     } else if (status?.state === 'post') {

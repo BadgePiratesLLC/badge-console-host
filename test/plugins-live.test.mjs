@@ -32,6 +32,11 @@ test('weather plugin returns a real current-conditions card for a US location', 
   assert.equal(typeof card.value, 'number');
   assert.ok(card.value > -60 && card.value < 140, `temp ${card.value}°F should be a plausible real reading`);
   assert.ok(card.subtitle.length > 0);
+  // Nexus 7175f3fc: this used to be 'none' for anything but an exactly-clear
+  // reading — the badge now has a shape for every sky state, so a real
+  // observation (whatever today's weather actually is) should always
+  // resolve to one of them, never silently fall through to no icon.
+  assert.match(card.icon, /^weather-(sunny|cloudy|rain|snow)$/, `icon "${card.icon}" should be one of the four weather shapes`);
 });
 
 test('sports plugin returns a live score, next game, or last result — never the season record (Nexus 365ba2c6)', { timeout: 15000 }, async () => {
@@ -49,6 +54,12 @@ test('sports plugin returns a live score, next game, or last result — never th
     `value "${card.value}" should be a live score, W/L result, or next-game time`,
   );
   assert.match(card.subtitle, /\d+-\d+|—/, 'the season record should still be reachable, in the subtitle');
+  // Nexus 7175f3fc: Kevin couldn't tell the sports tile was the Chiefs from
+  // "KC" alone. ESPN's team short name for KC is "Chiefs" (6 chars, well
+  // under the fallback threshold), so the title should always start with
+  // the real name now, not the bare abbreviation — a live game appends
+  // " Q3"/" LIVE" after it, hence startsWith rather than strict equality.
+  assert.ok(card.title.startsWith('CHIEFS'), `title "${card.title}" should start with CHIEFS, not KC`);
 });
 
 test('sports plugin surfaces an error (not a zero) for a bogus team', { timeout: 15000 }, async () => {

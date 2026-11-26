@@ -59,7 +59,39 @@ above. *(Releases aren't published yet — see "Status" below.)*
 **Not X/Twitter** — API access starts near $200/month, which doesn't fit
 a $45 device. See `docs/DECISIONS.md` before re-proposing it.
 
-## Status (2026-11-26)
+## Status (2026-11-26, v0.1.7)
+
+**Since the last status update (Nexus 7175f3fc — desk console 2.3.2):**
+
+- `weather.mjs`'s icon mapping no longer relies on a `textDescription`
+  regex that only ever matched "clear" — it now reads NWS's actual
+  condition code (the last path segment of the observation's `icon` URL)
+  and maps the full code set onto the badge's four weather shapes (sunny/
+  cloudy/rain/snow), falling back to the description text only if `icon`
+  itself is missing. Previously, any real-world non-clear reading (i.e.
+  most of the time) pushed `icon: 'none'` — "the weather tile has lost its
+  icon" was a mapping gap, not a regression. Covered by
+  `test/plugins-live.test.mjs` (asserts the live card's icon is always one
+  of the four, never `none`).
+- `sports.mjs` sends ESPN's team short name (`t.name`, e.g. "Chiefs")
+  instead of the bare abbreviation ("KC") for the tile title, falling back
+  to the abbreviation above 10 characters since this plugin has no way to
+  measure the badge's actual pixel width — `CardApp`'s own auto-fit/
+  ellipsis on the firmware side is the real safety net for a borderline
+  name. Covered by `test/plugins-live.test.mjs`.
+- Confirmed, not changed: `plugin-runtime.mjs`'s `_poll()` already clears
+  `status.lastError` unconditionally on the next successful push (it did
+  before this release too) — the "push to badge failed: fetch failed"
+  `lastError` Jared saw on `openai`/`sports`/`weather` right after the
+  2.3.1 reboot was the transient it looked like, not a sticky flag. No
+  code change; verified with a forced-fail-then-succeed `PluginRuntime`
+  run.
+- Both changes are to feed plugins only — no `server.mjs`/`action-server.mjs`/
+  `plugin-runtime.mjs` wire-format changes. Still needs its usual `git pull`
+  + restart on whichever host runs this from source — a tag/release alone
+  never reaches a from-source install.
+
+## Status (2026-11-26, Nexus ba0be49a)
 
 **Since the last status update (Nexus ba0be49a — "bookshelf HA button does
 nothing when tapped"):**

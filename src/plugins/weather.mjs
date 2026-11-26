@@ -27,6 +27,51 @@ async function fetchJson(url) {
 
 const stationCache = new Map(); // "lat,lon" -> stationId
 
+// Nexus 7175f3fc item 2: the badge used to have exactly one weather icon
+// (sun) and drew nothing at all on a cloudy/rainy/snowy reading — "the
+// weather tile has lost its icon" was really "every reading that isn't
+// clear has no mapping." CardIcons.cpp now draws four shapes (weather-
+// sunny/cloudy/rain/snow); this maps NWS's full condition-code set onto
+// those four instead of guessing from the freeform textDescription string
+// alone, which varies in wording release to release (and was the whole
+// reason a real "Cloudy" reading used to show nothing below).
+//
+// NWS's `icon` field is a URL like ".../icons/land/day/ovc?size=medium"
+// (or ".../day/skc,40?size=medium" for a two-part forecast icon) — the
+// last path segment before the query string, day/night prefix aside, is
+// the documented condition code (https://api.weather.gov/icons).
+const SNOW_CODES = /^(snow|rain_snow|snow_sleet|sleet|blizzard|snow_fzra)/;
+const RAIN_CODES = /^(rain|tsra|rain_fzra|fzra)/;
+const CLEAR_CODES = /^(skc|few)/; // clear / mostly clear — the only two NWS codes for "sunny"
+
+function iconCodeFromUrl(url) {
+  if (!url) return null;
+  const seg = url.split('?')[0].split('/').filter(Boolean).pop();
+  return seg ? seg.split(',')[0].toLowerCase() : null;
+}
+
+function iconForObservation(p) {
+  const code = iconCodeFromUrl(p.icon);
+  if (code) {
+    if (SNOW_CODES.test(code)) return 'weather-snow';
+    if (RAIN_CODES.test(code)) return 'weather-rain';
+    if (CLEAR_CODES.test(code)) return 'weather-sunny';
+    // sct/bkn/ovc/fog/haze/smoke/dust/wind_*/tornado/hurricane/... — none
+    // of those are "clear", and the badge only has four shapes to pick
+    // from, so everything else reads as "cloudy" rather than "no icon".
+    return 'weather-cloudy';
+  }
+  // Seen live: an occasional observation with both `icon` and
+  // `textDescription` blank. Fall back to the description text; if that's
+  // blank too, there's genuinely nothing to go on — CardIcon::None is the
+  // badge's "no icon, never a crash" sentinel (CardSchema.md), not a bug.
+  const text = p.textDescription || '';
+  if (/snow|sleet|blizzard/i.test(text)) return 'weather-snow';
+  if (/rain|shower|storm|drizzle/i.test(text)) return 'weather-rain';
+  if (/clear|sunny|fair/i.test(text)) return 'weather-sunny';
+  return text ? 'weather-cloudy' : 'none';
+}
+
 export async function poll(ctx) {
   const lat = ctx.settings.lat || '39.0997';
   const lon = ctx.settings.lon || '-94.5786';
@@ -49,12 +94,7 @@ export async function poll(ctx) {
     throw new Error(`Nearest station (${stationId}) has no recent observation.`);
   }
   const tempF = Math.round((p.temperature.value * 9) / 5 + 32);
-  // Only the one weather icon the badge draws (CardIcons.cpp) actually
-  // exists today — showing it on a rainy/cloudy reading would be a wrong
-  // icon, not a missing one, so this only fires on an actually-clear
-  // description. CardIcon::None (the default) just means no icon, never a
-  // crash — see CardSchema.md.
-  const icon = /clear|sunny|fair/i.test(p.textDescription || '') ? 'weather-sunny' : 'none';
+  const icon = iconForObservation(p);
 
   const now = Date.now();
   return {
