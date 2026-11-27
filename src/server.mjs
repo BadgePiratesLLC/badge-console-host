@@ -289,6 +289,12 @@ export async function runCli() {
       .then((r) => log.info(`Autostart installed via ${r.method} (${r.path}).`))
       .catch((e) => { log.error(`Autostart install failed: ${e.message}`); process.exitCode = 1; });
   }
+  if (process.argv.includes('--uninstall-autostart')) {
+    const { uninstallAutostart } = await import('./autostart.mjs');
+    return uninstallAutostart()
+      .then(() => log.info('Autostart entry removed.'))
+      .catch((e) => { log.error(`Autostart uninstall failed: ${e.message}`); process.exitCode = 1; });
+  }
   return start();
 }
 

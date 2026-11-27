@@ -66,3 +66,11 @@ Filename: "{app}\badge-console-host.exe"; Parameters: "--install-autostart"; Tas
 ; on a loaded CI/VM runner is exactly the kind of flake this avoids.
 Filename: "{app}\badge-console-host.exe"; Description: "Start Badge Console Host now"; Flags: nowait postinstall skipifsilent
 Filename: "{cmd}"; Parameters: "/c ping 127.0.0.1 -n 2 >nul && start http://127.0.0.1:4173"; Flags: runhidden nowait postinstall skipifsilent
+
+[UninstallRun]
+; Codex review (Nexus b1ad1a04): without this, a "start at login" task
+; created by [Run]'s --install-autostart above survives uninstall and
+; keeps trying to launch an exe that's just been deleted. Runs before
+; the exe itself is removed, same idempotent --uninstall-autostart path
+; regardless of whether the checkbox was ever checked.
+Filename: "{app}\badge-console-host.exe"; Parameters: "--uninstall-autostart"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveAutostartTask"

@@ -94,17 +94,27 @@ X-GNOME-Autostart-enabled=true
   return { method: 'XDG autostart', path: desktopPath };
 }
 
+const WINDOWS_TASK_NAME = 'BadgeConsoleHost';
+
 async function installWindows() {
   const { command, args } = binaryInvocation();
-  const taskName = 'BadgeConsoleHost';
   const argStr = args.map((a) => `"${a}"`).join(' ');
   // schtasks ships with every supported Windows release; ONLOGON quiet-starts
   // without an elevated prompt when scoped to the current user.
   await execFileAsync('schtasks', [
-    '/Create', '/F', '/SC', 'ONLOGON', '/TN', taskName,
+    '/Create', '/F', '/SC', 'ONLOGON', '/TN', WINDOWS_TASK_NAME,
     '/TR', `"${command}" ${argStr}`,
   ]);
-  return { method: 'Task Scheduler (schtasks)', path: taskName };
+  return { method: 'Task Scheduler (schtasks)', path: WINDOWS_TASK_NAME };
+}
+
+// Nexus b1ad1a04 (Codex review): the Windows installer's uninstaller calls
+// this before deleting the exe, so a "start at login" task created by
+// installWindows() above doesn't keep trying to launch a path that no
+// longer exists. schtasks exits non-zero if the task was never created
+// (checkbox left unchecked) — that's a normal uninstall, not a failure.
+async function uninstallWindows() {
+  await execFileAsync('schtasks', ['/Delete', '/F', '/TN', WINDOWS_TASK_NAME]).catch(() => {});
 }
 
 export async function installAutostart() {
@@ -112,4 +122,9 @@ export async function installAutostart() {
   if (process.platform === 'linux') return installLinux();
   if (process.platform === 'win32') return installWindows();
   throw new Error(`No autostart method implemented for platform "${process.platform}".`);
+}
+
+export async function uninstallAutostart() {
+  if (process.platform === 'win32') return uninstallWindows();
+  throw new Error(`No autostart uninstall implemented for platform "${process.platform}".`);
 }
