@@ -79,9 +79,10 @@ test('pair -> enable openclaw feed -> test -> badge receives a real POST /cards'
 
   const base = `http://127.0.0.1:${hostPort}`;
 
-  // 1. Config page loads and lists all 7 plugins.
+  // 1. Config page loads and lists all 8 plugins (Nexus 281ee5a2 slice 4
+  // added worldclock as the 8th).
   const state1 = await fetch(`${base}/api/state`).then((r) => r.json());
-  assert.equal(state1.feeds.length, 7);
+  assert.equal(state1.feeds.length, 8);
   assert.equal(state1.badge.paired, false);
 
   // 2. Pair with the fake badge using its one-time 6-digit code.

@@ -14,6 +14,7 @@ import {
   _resetCacheForTests,
   editCardValue,
   removeCardValue,
+  addCardValue,
 } from '../src/plugins/stocks.mjs';
 
 function withMockFetch(handler, fn) {
@@ -300,4 +301,32 @@ test('removeCardValue drops the matching slot and rejoins the rest', () => {
 
 test('removeCardValue returns null for an unknown card id', () => {
   assert.equal(removeCardValue({ symbols: 'AAPL' }, 'stocks-tsla'), null);
+});
+
+// Nexus 281ee5a2 slice 4: addCardValue is the "+ Add" empty-slot half,
+// called by plugin-runtime.mjs's handleAdd(). Unlike edit/remove it has
+// no card id to key off (the tile doesn't exist yet) — just the buyer's
+// raw typed symbol — and throws (not returns null) on rejection, since
+// the message is meant to reach the buyer as a toast.
+
+test('addCardValue appends a new symbol, uppercased', () => {
+  const next = addCardValue({ symbols: 'AAPL' }, 'tsla');
+  assert.equal(next.symbols, 'AAPL,TSLA');
+});
+
+test('addCardValue works from an empty/unset settings object', () => {
+  const next = addCardValue({}, 'aapl');
+  assert.equal(next.symbols, 'AAPL');
+});
+
+test('addCardValue rejects a 4th symbol past the 3-symbol max', () => {
+  assert.throws(() => addCardValue({ symbols: 'AAPL,TSLA,MSFT' }, 'GOOGL'), /already have 3/i);
+});
+
+test('addCardValue rejects a symbol already tracked, case-insensitively', () => {
+  assert.throws(() => addCardValue({ symbols: 'AAPL,TSLA' }, 'aapl'), /already added/i);
+});
+
+test('addCardValue rejects a blank value', () => {
+  assert.throws(() => addCardValue({ symbols: 'AAPL' }, '   '), /enter a ticker/i);
 });
