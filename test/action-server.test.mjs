@@ -135,6 +135,50 @@ test('an /edit body with no id is rejected with 400 once auth has passed', async
   assert.equal(res.status, 400);
 });
 
+// Nexus 281ee5a2 slice 3: POST /move is the badge-served layout editor's
+// drag/reorder relay. No top-level `id` — carries a "moves" array of
+// {id, order} pairs instead, same reverse channel as /edit.
+
+function fakeMoveRuntime(handler) {
+  return { handleAction: async () => { throw new Error('not used in these tests'); }, handleMove: handler };
+}
+
+test('a /move request with a missing X-Auth-Token is refused with 401 and never reaches the runtime', async () => {
+  await setBadgeToken('real-token');
+  let called = false;
+  const server = createActionServer(fakeMoveRuntime(async () => { called = true; }));
+  const res = await post(server, { path: '/move', body: { moves: [{ id: 'card-1', order: 0 }] } });
+  assert.equal(res.status, 401);
+  assert.equal(called, false);
+});
+
+test('the right token with a moves array calls runtime.handleMove with the array and returns 200', async () => {
+  await setBadgeToken('real-token');
+  const calls = [];
+  const server = createActionServer(fakeMoveRuntime(async (moves) => { calls.push(moves); }));
+  const res = await post(server, {
+    path: '/move',
+    headers: { 'X-Auth-Token': 'real-token' },
+    body: { moves: [{ id: 'card-1', order: 1 }, { id: 'card-2', order: 0 }] },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(calls, [[{ id: 'card-1', order: 1 }, { id: 'card-2', order: 0 }]]);
+});
+
+test('a /move with an unknown card id surfaces as 404', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeMoveRuntime(async () => { throw new Error('No known card owner for id "x".'); }));
+  const res = await post(server, { path: '/move', headers: { 'X-Auth-Token': 'real-token' }, body: { moves: [{ id: 'x', order: 0 }] } });
+  assert.equal(res.status, 404);
+});
+
+test('a /move body with no moves array is rejected with 400 once auth has passed', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeMoveRuntime(async () => {}));
+  const res = await post(server, { path: '/move', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'card-1' } });
+  assert.equal(res.status, 400);
+});
+
 test('an unrouted path still 404s without reaching the runtime', async () => {
   await setBadgeToken('real-token');
   let called = false;

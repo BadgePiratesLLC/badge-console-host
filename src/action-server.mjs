@@ -25,6 +25,13 @@
 // page 404'd back to it (this listener answered only /action, everything
 // else fell into the 404 branch below) — the edit never actually did
 // anything past the badge's own 200 to the browser.
+//
+// POST /move is slice 3's drag/reorder half of the same channel, relayed
+// by the firmware's /tile-move handler -> ActionClient::sendMove(). Body
+// shape is different from /action and /edit — there is no top-level `id`,
+// instead {"moves": [{"id", "order"}, ...]} carries every card whose
+// display position changed in one call (docs/CardSchema.md "Drag/
+// reorder" in QACode_27). Routed to PluginRuntime.handleMove().
 
 import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
@@ -68,6 +75,7 @@ export function createActionServer(runtime) {
     const url = new URL(req.url, 'http://0.0.0.0');
     const kind = req.method === 'POST' && url.pathname === '/action' ? 'action'
       : req.method === 'POST' && url.pathname === '/edit' ? 'edit'
+      : req.method === 'POST' && url.pathname === '/move' ? 'move'
       : null;
     if (!kind) {
       log.info(`action listener: ignored ${req.method} ${url.pathname} from ${remote}`);
@@ -88,9 +96,28 @@ export function createActionServer(runtime) {
       log.info(`${kind} request from ${remote} rejected: bad json body`);
       return sendJson(res, 400, { error: 'bad json' });
     }
-    if (!body.id || typeof body.id !== 'string') {
+    // /move has no top-level id — it carries a "moves" array instead (see
+    // the module header comment above).
+    if (kind !== 'move' && (!body.id || typeof body.id !== 'string')) {
       log.info(`${kind} request from ${remote} rejected: missing id`);
       return sendJson(res, 400, { error: 'missing id' });
+    }
+    if (kind === 'move' && !Array.isArray(body.moves)) {
+      log.info(`move request from ${remote} rejected: missing moves array`);
+      return sendJson(res, 400, { error: 'missing moves array' });
+    }
+
+    if (kind === 'move') {
+      log.info(`move request from ${remote}: ${body.moves.length} card(s)`);
+      try {
+        await runtime.handleMove(body.moves);
+        log.info(`move from ${remote}: ok`);
+        return sendJson(res, 200, { ok: true });
+      } catch (e) {
+        log.error(`move from ${remote}: failed: ${e.message}`);
+        const notFound = /no known card owner|needs a non-empty id|needs a numeric order/i.test(e.message);
+        return sendJson(res, notFound ? 404 : 502, { ok: false, error: e.message });
+      }
     }
 
     if (kind === 'action') {
