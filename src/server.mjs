@@ -16,6 +16,8 @@ import { browse as mdnsBrowse } from './mdns.mjs';
 import { PluginRuntime } from './plugin-runtime.mjs';
 import { start as startActionServer } from './action-server.mjs';
 import { log } from './logger.mjs';
+import { checkForSelfUpdate, getCachedSelfUpdateStatus } from './self-update-check.mjs';
+import VERSION from './version.mjs';
 
 import * as openclaw from './plugins/openclaw.mjs';
 import * as anthropic from './plugins/anthropic.mjs';
@@ -99,7 +101,22 @@ async function handleApi(req, res, pathname) {
       for (const cred of p.credentialsSchema) credState[cred.account] = await hasSecret(SERVICE, cred.account);
       withCreds.push({ ...p, config: feedCfg, status: status[p.id], credentials: credState });
     }
-    return sendJson(res, 200, { feeds: withCreds, badge: { host: cfg.badge.host, port: cfg.badge.port, paired: cfg.badge.paired } });
+    return sendJson(res, 200, { feeds: withCreds, badge: { host: cfg.badge.host, port: cfg.badge.port, paired: cfg.badge.paired }, version: VERSION });
+  }
+
+  // --- Self-update (Nexus b1ad1a04): check GitHub Releases for this app's
+  // own latest version, prompt-only — see docs/DECISIONS.md. ---
+  if (pathname === '/api/self/update-status' && req.method === 'GET') {
+    return sendJson(res, 200, await checkForSelfUpdate(VERSION));
+  }
+
+  if (pathname === '/api/self/update-check' && req.method === 'POST') {
+    try {
+      const result = await checkForSelfUpdate(VERSION, { force: true });
+      return sendJson(res, 200, result);
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message });
+    }
   }
 
   if (pathname.match(/^\/api\/feeds\/[\w-]+$/) && req.method === 'POST') {

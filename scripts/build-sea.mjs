@@ -26,6 +26,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const OUT_NAME = process.platform === 'win32' ? 'badge-console-host.exe' : 'badge-console-host';
+const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
 fs.mkdirSync(DIST, { recursive: true });
 
@@ -46,6 +47,10 @@ await build({
   platform: 'node',
   format: 'cjs',
   target: 'node20',
+  // version.mjs's `typeof __APP_VERSION__` check reads this define as a
+  // bundle-time constant — the SEA binary has no package.json sitting next
+  // to it on disk to fall back to (see version.mjs, docs/DECISIONS.md).
+  define: { __APP_VERSION__: JSON.stringify(PKG.version) },
   // esbuild empties import.meta for a cjs target and warns at every
   // remaining `import.meta.url` reference. The two left (server.mjs's
   // direct-run guard, autostart.mjs's non-SEA fallback path) are both

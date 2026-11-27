@@ -34,6 +34,28 @@ async function loadState() {
     document.getElementById('badge-ota-actions').style.display = 'none';
     document.getElementById('badge-ota-status').textContent = '';
   }
+  loadSelfUpdateStatus();
+}
+
+// Nexus b1ad1a04: this app's own update check (vs. the badge firmware's,
+// above) — GitHub Releases only, check-and-prompt, never a silent
+// self-replace. The server caches the GitHub call for 24h regardless of
+// how often this polls, so polling on the same 10s loadState() loop is
+// harmless (see self-update-check.mjs).
+async function loadSelfUpdateStatus() {
+  const banner = document.getElementById('self-update-banner');
+  try {
+    const status = await api('/api/self/update-status');
+    if (status.updateAvailable) {
+      banner.style.display = '';
+      banner.className = 'status-line warn';
+      banner.innerHTML = `A new version is available: v${status.latestVersion} (you're on v${status.currentVersion}). <a href="${status.latestUrl}" target="_blank" rel="noopener">Download it</a>.`;
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch {
+    banner.style.display = 'none';
+  }
 }
 
 function renderBadge(badge) {

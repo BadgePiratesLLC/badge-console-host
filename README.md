@@ -12,6 +12,28 @@ Nexus 3a6a69b5. Depends on the card schema (Nexus 7c9c1a15, QACode_27
 
 ## For a buyer: install
 
+**Easiest — a real installer, no terminal at all (Nexus b1ad1a04):**
+grab the one for your OS from the
+[latest release](https://github.com/BadgePiratesLLC/badge-console-host/releases/latest):
+
+- **Windows:** `badge-console-host-Setup.exe` — double-click, optionally
+  leave "start at login" checked, it opens
+  **http://127.0.0.1:4173** when done. First run shows Windows SmartScreen's
+  "protected your PC" warning (installer is currently unsigned — see
+  `docs/DECISIONS.md` "Code signing" for the cost/options to fix that);
+  click "More info → Run anyway."
+- **macOS:** `badge-console-host.dmg` — open it, drag **Badge Console
+  Host** to Applications, open it from there (Gatekeeper will say it's from
+  an unidentified developer the first time — right-click → Open once).
+- **Linux:** `badge-console-host.deb` — `sudo dpkg -i badge-console-host.deb`,
+  then launch **Badge Console Host** from your app menu, or run
+  `badge-console-host` from a terminal.
+
+None of these need Node installed — the runtime is bundled in.
+
+**Or, the one-line terminal install** (same bundled binary, registers
+autostart unconditionally, no GUI):
+
 macOS / Linux:
 ```
 curl -fsSL https://raw.githubusercontent.com/BadgePiratesLLC/badge-console-host/main/install/install.sh | sh
@@ -22,10 +44,15 @@ Windows (PowerShell, no admin needed):
 iwr https://raw.githubusercontent.com/BadgePiratesLLC/badge-console-host/main/install/install.ps1 -UseBasicParsing | iex
 ```
 
-That installs a single binary, registers it to start on login, and opens
-nothing by itself — go to **http://127.0.0.1:4173** in a browser to pair
-your badge and turn on feeds. No terminal needed after the one command
-above. *(Releases aren't published yet — see "Status" below.)*
+Either path installs a single binary and opens nothing by itself unless
+you used the GUI installer above — go to **http://127.0.0.1:4173** in a
+browser to pair your badge and turn on feeds. *(Releases aren't published
+yet — see "Status" below; the repo itself is also still private, see
+Nexus 129c50c9.)*
+
+Once running, the config page checks GitHub Releases for a newer version
+once a day and shows a banner with a download link if one exists — it
+never downloads or replaces itself automatically (`src/self-update-check.mjs`).
 
 ## For a buyer: using it
 

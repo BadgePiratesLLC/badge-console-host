@@ -311,3 +311,73 @@ shut, this is the real last close," and `state: 'ok'` means "fresh,
 market's open." Up/down day, which the v1 plugin encoded as `ok`/`warn`
 (overloading `warn` to mean "red," not "stale"), moved to the icon alone
 (`stock-up`/`stock-down`) so `warn` means one thing.
+
+## One-click installers (Nexus b1ad1a04): what they wrap and don't change
+
+Windows (`installer/windows/setup.iss`, Inno Setup), macOS
+(`installer/macos/build-dmg.sh`, a hand-built `.app` + `hdiutil`), and Linux
+(`installer/linux/build-deb.sh`, `dpkg-deb`) installers all wrap the exact
+same `dist/badge-console-host[.exe]` `scripts/build-sea.mjs` already builds
+and `scripts/sea-smoke.mjs` already proves starts — none of them rebuild or
+re-bundle anything. `.github/workflows/release.yml`'s new
+`package-installers` job runs each OS's packaging script on that OS's own
+real GitHub-hosted runner, then re-runs `sea-smoke.mjs` against the
+*installed* copy (not the raw binary a second time) — the same "build exits
+0 isn't the same claim as the artifact starts" discipline the Single-
+executable packaging section above describes for Nexus bcae3a08, one layer
+up: an installer that unpacks a different file than it tested, or chmods it
+wrong, or points a shortcut at the wrong path, would ship a second,
+installer-shaped way to recreate that exact bug.
+
+Windows gets a "start at login" checkbox (Inno Setup `[Tasks]`, checked by
+default) that — only if left checked — runs the existing, idempotent
+`--install-autostart` flag (`src/autostart.mjs`) as a post-install step; no
+new autostart mechanism was written for this. macOS and Linux installers
+deliberately do **not** auto-register a login item on install (unlike
+`install.sh`/`install.ps1`, which already did and still do, unconditionally,
+for anyone using the terminal one-liner) — silently adding a login item from
+a GUI installer with no visible checkbox is the kind of thing a buyer
+notices later and resents; a buyer who wants that on Mac/Linux still has
+`--install-autostart` one flag away, or the existing curl path.
+
+## Code signing: cost and options (Nexus b1ad1a04 — spend decision, not mine to make)
+
+Both unsigned installers above will trip a warning on first run, and this
+is not a bug to "fix" in code — it's unavoidable without actually paying
+for identity verification:
+
+- **Windows:** SmartScreen shows "Windows protected your PC" / "Unrecognized
+  app" on an unsigned (or newly-signed, low-reputation) `.exe`, requiring an
+  extra "More info → Run anyway" click. Since March 2024, Microsoft builds
+  SmartScreen reputation off download volume for **both** OV and EV
+  certificates, not EV-only as older guidance claimed — so EV no longer
+  buys instant trust the way it once did; it mainly matters now for kernel-
+  mode drivers, which this product has none of.
+- **macOS:** Gatekeeper refuses to open an app from an "unidentified
+  developer" at all (not just a warning) unless the buyer right-clicks →
+  Open, or the app is notarized. Our current ad-hoc signing
+  (`codesign -s -`, in both `build-sea.mjs` and
+  `installer/macos/build-dmg.sh`) avoids the harsher "is damaged and can't
+  be opened" failure a *totally* unsigned app can hit on recent macOS, but
+  does not clear Gatekeeper's identified-developer bar — that needs a real
+  Apple Developer ID.
+
+**Options and real-world cost, 2026 pricing (reseller quotes; get a live
+quote before budgeting — these move):**
+
+| Option | Cost | Covers | Notes |
+|---|---|---|---|
+| Do nothing (current state) | $0 | — | Both OSes show a scary-looking warning; install/install.sh's/.ps1's own users already see this today and it hasn't blocked anyone, but a GUI installer is the first impression for a buyer who isn't comfortable with a terminal |
+| **Azure Trusted Signing** (Microsoft, recently renamed "Artifact Signing") | **$9.99/mo (Basic, 5,000 signatures/mo)** | Windows only | Cheapest real option; a Microsoft-issued cert, short-lived (resigned per-build via CI, no hardware token to manage), identity verification required once at signup (business must be ≥3 years old OR have an individual identity-verified enrollment — verify Badge Pirates LLC qualifies before committing) |
+| Sectigo OV code signing cert | **~$220/yr** (reseller) to $536/yr (Sectigo direct, 5-yr term) | Windows only | Traditional cert + USB hardware token or cloud HSM slot; annual renewal process, more manual than Trusted Signing |
+| DigiCert/Sectigo EV code signing cert | **~$290–$685/yr** | Windows only | No longer buys instant SmartScreen trust (see above) — mainly worth it only if kernel driver signing is ever needed, which it isn't here |
+| **Apple Developer Program** | **$99/yr** | macOS only (also unlocks iOS/notarization) | The only way to clear Gatekeeper's "unidentified developer" block short of telling every buyer to right-click → Open; no cheaper tier exists |
+| Linux (.deb/AppImage) | $0 | — | No OS-level Gatekeeper/SmartScreen equivalent exists on Linux; nothing to buy here regardless of what's decided for Windows/macOS |
+
+**Recommendation (Jared/Kevin's call, not executed here — nothing was
+purchased):** Azure Trusted Signing ($9.99/mo ≈ $120/yr) for Windows plus
+the Apple Developer Program ($99/yr) for macOS — **≈$220/yr total** — covers
+both desktop OSes a buyer is actually likely to hit the warning on, at the
+lowest real cost for each. Skip the OV/EV cert path entirely; it costs more
+than Trusted Signing for the same Windows outcome now that EV's SmartScreen
+advantage is gone. Nothing on Linux needs a spend.
