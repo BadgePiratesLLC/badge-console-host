@@ -13,8 +13,20 @@
 // onAction), 200 on success, 502 if the plugin's onAction() throws.
 
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { getBadgeToken } from './badge-client.mjs';
 import { log } from './logger.mjs';
+
+// Plain !== leaks timing info proportional to the matching prefix length.
+// Not a practical risk over LAN/WiFi jitter against a 128-bit token, but a
+// public reviewer will flag it on sight (Nexus f61a7772) — constant-time
+// compare costs nothing here. Buffers must be equal length for
+// timingSafeEqual, so a length mismatch short-circuits to false first.
+function tokenMatches(supplied, expected) {
+  const a = Buffer.from(supplied, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 async function readJsonBody(req) {
   const chunks = [];
@@ -46,7 +58,8 @@ export function createActionServer(runtime) {
     }
 
     const token = await getBadgeToken();
-    if (!token || req.headers['x-auth-token'] !== token) {
+    const supplied = req.headers['x-auth-token'];
+    if (!token || typeof supplied !== 'string' || !tokenMatches(supplied, token)) {
       log.info(`action request from ${remote} rejected: bad or missing X-Auth-Token`);
       return sendJson(res, 401, { error: 'bad or missing X-Auth-Token' });
     }
