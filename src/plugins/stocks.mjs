@@ -200,6 +200,54 @@ function buildCard(symbol, quote, { open, stale, order }) {
   };
 }
 
+// Nexus 281ee5a2 slice 2/3: the badge-served layout editor's tap-to-edit
+// and delete relay (plugin-runtime.mjs's handleEdit) calls these with
+// this plugin's OWN current settings and one of its own card ids
+// (`stocks-<symbol>`, lowercased — see buildCard()) and gets back a new
+// settings object to persist, or null if cardId isn't one of this
+// plugin's slots. Same index-into-the-comma-joined-string mechanics as
+// the Feeds page's renderSymbolListSetting (app.js) — one storage format,
+// edited from two surfaces.
+function findSymbolIndex(settings, cardId) {
+  const symbols = String(settings?.symbols ?? settings?.symbol ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const idx = symbols.findIndex((s) => `stocks-${s.toLowerCase()}` === cardId);
+  return { symbols, idx };
+}
+
+export function editCardValue(settings, cardId, newValue) {
+  const { symbols, idx } = findSymbolIndex(settings, cardId);
+  if (idx < 0) return null;
+  const cleaned = String(newValue || '').trim().toUpperCase();
+  if (!cleaned) return null;
+  symbols[idx] = cleaned;
+  return { ...settings, symbols: symbols.join(',') };
+}
+
+export function removeCardValue(settings, cardId) {
+  const { symbols, idx } = findSymbolIndex(settings, cardId);
+  if (idx < 0) return null;
+  const next = symbols.filter((_, j) => j !== idx);
+  return { ...settings, symbols: next.join(',') };
+}
+
+// Nexus 281ee5a2 slice 4: the layout editor's "+ Add" empty-slot flow
+// (plugin-runtime.mjs's handleAdd). `value` is whatever the buyer typed
+// on the badge — a ticker symbol. Enforces the same 3-symbol cap the
+// settingsSchema's `max` already advertises on the Feeds page, and
+// rejects a symbol already tracked instead of silently duplicating it
+// (two tiles racing to update the same quote would just be confusing).
+export function addCardValue(settings, value) {
+  const { symbols } = findSymbolIndex(settings, '');
+  const cleaned = String(value || '').trim().toUpperCase();
+  if (!cleaned) throw new Error('Enter a ticker symbol.');
+  if (symbols.length >= 3) throw new Error('Already have 3 stock symbols (max) — remove one first.');
+  if (symbols.includes(cleaned)) throw new Error(`"${cleaned}" is already added.`);
+  return { ...settings, symbols: [...symbols, cleaned].join(',') };
+}
+
 export async function poll(ctx) {
   const symbols = parseSymbols(ctx.settings);
   const apiKey = await ctx.getSecret('finnhub-api-key');
