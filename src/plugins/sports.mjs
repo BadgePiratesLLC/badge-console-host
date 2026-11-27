@@ -46,6 +46,22 @@ function formatResult(home, away, abbr) {
   return { value: `${letter} ${usScore}-${oppScore}`, opponent: opp?.team?.abbreviation };
 }
 
+// Nexus 05eaf268: single-slot feed (one team at a time, via the Feeds
+// page's `team` setting) — the layout editor's tap-to-edit relay
+// (plugin-runtime.mjs's handleEdit) had no editCardValue() to call at all,
+// so retyping the team abbreviation from the badge wasn't possible; the
+// Feeds page text field was the only way in. `cardId` is always this
+// plugin's one card (`sports-<team>`, see poll()) since there's only ever
+// one slot, but it's still checked rather than assumed, the same way every
+// other plugin's editCardValue() validates its id.
+export function editCardValue(settings, cardId, newValue) {
+  const currentTeam = (settings?.team || 'KC').toLowerCase();
+  if (cardId !== `sports-${currentTeam}`) return null;
+  const cleaned = String(newValue || '').trim().toUpperCase();
+  if (!cleaned) return null;
+  return { ...settings, team: cleaned };
+}
+
 export async function poll(ctx) {
   const sport = ctx.settings.sport || 'football/nfl';
   const team = (ctx.settings.team || 'KC').toLowerCase();
@@ -155,6 +171,10 @@ export async function poll(ctx) {
         order: 1,
         updatedAt: now,
         ttlSeconds: 1800,
+        // See stocks.mjs's matching comment — editCardValue() above needs
+        // these two set for the badge to show a text field at all.
+        editLabel: 'Team',
+        editValue: abbr,
       },
     ],
   };

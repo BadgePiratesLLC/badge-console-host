@@ -197,6 +197,14 @@ function buildCard(symbol, quote, { open, stale, order }) {
     order,
     updatedAt: Date.now(),
     ttlSeconds: 1800,
+    // Nexus 05eaf268: editCardValue()/addCardValue() below already let the
+    // layout editor rebind this tile's symbol, but the badge only shows a
+    // text field at all when editLabel/editValue are both set (see
+    // data/layout.html's openEditSheet() in the firmware repo) — without
+    // these two, every tap-to-edit on a stock tile silently fell back to
+    // color-and-delete only, with no way to retype the ticker.
+    editLabel: 'Symbol',
+    editValue: symbol,
   };
 }
 

@@ -199,6 +199,12 @@ test('stocks plugin builds up to 3 tiles from a comma-separated symbol list, eac
       assert.deepEqual(result.cards.map((c) => c.title), ['AAPL', 'MSFT', 'TSLA']);
       assert.equal(result.cards[1].icon, 'stock-down'); // MSFT: 100 < 102
       assert.equal(result.cards[2].icon, 'stock-up'); // TSLA: 50 > 49
+      // Nexus 05eaf268: the badge only shows a tap-to-edit text field when
+      // both of these are set (see data/layout.html's openEditSheet() in
+      // the firmware repo) — editCardValue() existing isn't enough on its
+      // own for the symbol to actually be rebindable from the badge.
+      assert.deepEqual(result.cards.map((c) => c.editLabel), ['Symbol', 'Symbol', 'Symbol']);
+      assert.deepEqual(result.cards.map((c) => c.editValue), ['AAPL', 'MSFT', 'TSLA']);
     },
   );
 });

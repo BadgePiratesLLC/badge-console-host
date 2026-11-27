@@ -22,7 +22,7 @@ import path from 'node:path';
 import { setScratchHome } from './_helpers.mjs';
 
 const { poll: pollWeather } = await import('../src/plugins/weather.mjs');
-const { poll: pollSports } = await import('../src/plugins/sports.mjs');
+const { poll: pollSports, editCardValue: editSportsCardValue } = await import('../src/plugins/sports.mjs');
 
 test('weather plugin returns a real current-conditions card for a US location', { timeout: 15000 }, async () => {
   const result = await pollWeather({ settings: { lat: '39.0997', lon: '-94.5786' }, getSecret: async () => null });
@@ -60,6 +60,33 @@ test('sports plugin returns a live score, next game, or last result — never th
   // the real name now, not the bare abbreviation — a live game appends
   // " Q3"/" LIVE" after it, hence startsWith rather than strict equality.
   assert.ok(card.title.startsWith('CHIEFS'), `title "${card.title}" should start with CHIEFS, not KC`);
+  // Nexus 05eaf268: the badge only shows a tap-to-edit text field when
+  // both of these are set — see editCardValue tests below for the other
+  // half (an editCardValue() to actually call when that field is submitted).
+  assert.equal(card.editLabel, 'Team');
+  assert.equal(card.editValue, 'KC');
+});
+
+// Nexus 05eaf268: this plugin had no editCardValue() at all before —
+// the Feeds page's team field was the only way to rebind this card, since
+// the layout editor's tap-to-edit relay had nothing to call. Pure
+// function, no network needed.
+test('editCardValue rebinds the single team slot, case-insensitively matched against the current card id', () => {
+  const next = editSportsCardValue({ team: 'KC' }, 'sports-kc', 'lal');
+  assert.deepEqual(next, { team: 'LAL' });
+});
+
+test('editCardValue returns null for a card id that is not this plugin\'s current slot', () => {
+  assert.equal(editSportsCardValue({ team: 'KC' }, 'sports-lal', 'DEN'), null);
+});
+
+test('editCardValue returns null for a blank new value, leaving the slot alone', () => {
+  assert.equal(editSportsCardValue({ team: 'KC' }, 'sports-kc', '   '), null);
+});
+
+test('editCardValue defaults the current team to KC when unset, matching poll()\'s own default', () => {
+  const next = editSportsCardValue({}, 'sports-kc', 'DEN');
+  assert.deepEqual(next, { team: 'DEN' });
 });
 
 test('sports plugin surfaces an error (not a zero) for a bogus team', { timeout: 15000 }, async () => {

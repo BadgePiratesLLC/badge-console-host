@@ -61,6 +61,24 @@ async function haFetch(baseUrl, token, path, opts = {}) {
   return res;
 }
 
+// Nexus 05eaf268: this plugin had neither editCardValue() nor editLabel/
+// editValue on its cards — the layout editor's tap-to-edit relay had
+// nothing to call and the badge never showed a text field for either HA
+// card, so an entity id could only be (re)bound from the Feeds page, not
+// the badge itself. Two fixed slots (state, action), same as poll() below
+// — matched by this plugin's own id convention rather than a list index.
+export function editCardValue(settings, cardId, newValue) {
+  const cleaned = String(newValue || '').trim();
+  if (!cleaned) return null;
+  if (settings.stateEntityId && cardId === stateCardId(settings.stateEntityId)) {
+    return { ...settings, stateEntityId: cleaned };
+  }
+  if (settings.actionEntityId && cardId === actionCardId(settings.actionEntityId)) {
+    return { ...settings, actionEntityId: cleaned };
+  }
+  return null;
+}
+
 export async function poll(ctx) {
   const token = await ctx.getSecret('token');
   if (!token) throw new Error('No Home Assistant access token stored.');
@@ -88,6 +106,10 @@ export async function poll(ctx) {
       order: 5,
       updatedAt: now,
       ttlSeconds: 300,
+      // See stocks.mjs's matching comment — editCardValue() above needs
+      // these two set for the badge to show a text field at all.
+      editLabel: 'Entity id',
+      editValue: ctx.settings.stateEntityId,
     });
   }
 
@@ -117,6 +139,10 @@ export async function poll(ctx) {
       order: 6,
       updatedAt: now,
       ttlSeconds: 0, // a button doesn't go stale the way a reading does
+      // See stocks.mjs's matching comment — editCardValue() above needs
+      // these two set for the badge to show a text field at all.
+      editLabel: 'Entity id',
+      editValue: ctx.settings.actionEntityId,
     });
   }
 
