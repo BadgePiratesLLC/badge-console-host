@@ -37,8 +37,11 @@ function formatNextGame(iso) {
 function formatResult(home, away, abbr) {
   const us = home?.team?.abbreviation === abbr ? home : away;
   const opp = us === home ? away : home;
-  const usScore = Number(us?.score ?? 0);
-  const oppScore = Number(opp?.score ?? 0);
+  // ESPN's `score` field has shipped both as a plain number/string and as
+  // `{ value, displayValue }` (the shape it drifted to live during this
+  // repo's development) — accept either rather than silently NaN-ing out.
+  const usScore = Number(us?.score?.value ?? us?.score ?? 0);
+  const oppScore = Number(opp?.score?.value ?? opp?.score ?? 0);
   const letter = usScore > oppScore ? 'W' : usScore < oppScore ? 'L' : 'T';
   return { value: `${letter} ${usScore}-${oppScore}`, opponent: opp?.team?.abbreviation };
 }
