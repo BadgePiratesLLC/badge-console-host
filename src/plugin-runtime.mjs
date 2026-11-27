@@ -34,11 +34,12 @@
 // Each takes the plugin's own current settings object and this plugin's
 // own card-id convention (e.g. stocks' `stocks-<symbol>`) and returns a
 // NEW settings object, or null if cardId isn't one of this plugin's
-// editable slots. A plugin that defines neither only supports the two
+// editable slots. A plugin that defines neither only supports the three
 // generic, id-keyed overrides every card gets for free regardless of
-// plugin — color (cfg.cardOverrides[id].color) and delete-as-hide
-// (cfg.cardOverrides[id].hidden) — applied in _poll() below, after
-// poll() returns and before the push.
+// plugin — color (cfg.cardOverrides[id].color), delete-as-hide
+// (cfg.cardOverrides[id].hidden), and display position
+// (cfg.cardOverrides[id].order, slice 3's drag/reorder) — applied in
+// _poll() below, after poll() returns and before the push.
 
 import { getSecret } from './credential-store.mjs';
 import { pushCards } from './badge-client.mjs';
@@ -125,7 +126,14 @@ export class PluginRuntime {
     const overrides = cfg.cardOverrides || {};
     const cards = result.cards
       .filter((c) => !(c && c.id && overrides[c.id]?.hidden))
-      .map((c) => (c && c.id && overrides[c.id]?.color ? { ...c, color: overrides[c.id].color } : c));
+      .map((c) => {
+        if (!c || !c.id || !overrides[c.id]) return c;
+        const ov = overrides[c.id];
+        const patched = { ...c };
+        if (ov.color) patched.color = ov.color;
+        if (ov.order !== undefined) patched.order = ov.order;
+        return patched;
+      });
 
     if (cfg.badge.host) {
       try {
@@ -240,6 +248,53 @@ export class PluginRuntime {
     this._poll(plugin, feedCfg, loadConfig()).catch((e) => {
       log.error(`[${pluginId}] post-edit refresh poll failed: ${e.message}`);
     });
+  }
+
+  /**
+   * Called by action-server.mjs's POST /move — the badge-served layout
+   * editor's (Nexus 281ee5a2 slice 3) drag/reorder, relayed the same way
+   * as handleEdit() above. `moves` is the browser's raw array verbatim:
+   * [{ id, order }, ...], typically covering every card whose display
+   * position changed as a result of one drag, which can span more than
+   * one plugin's cards. Persisted the same generic, id-keyed way as
+   * color/hidden (cfg.cardOverrides[id].order) so it survives independent
+   * of which plugin owns the card, then every distinct owning plugin is
+   * re-polled so its next push carries the new order values.
+   */
+  async handleMove(moves) {
+    if (!Array.isArray(moves) || moves.length === 0) throw new Error('moves must be a non-empty array');
+    const pluginIds = new Set();
+    for (const m of moves) {
+      if (!m || typeof m.id !== 'string' || !m.id) throw new Error('every move needs a non-empty id');
+      if (typeof m.order !== 'number') throw new Error(`move for "${m.id}" needs a numeric order`);
+      const pluginId = this.cardOwner.get(m.id);
+      if (!pluginId) throw new Error(`No known card owner for id "${m.id}".`);
+      pluginIds.add(pluginId);
+    }
+
+    updateConfig((cfg) => {
+      cfg.cardOverrides = cfg.cardOverrides || {};
+      for (const m of moves) {
+        cfg.cardOverrides[m.id] = { ...cfg.cardOverrides[m.id], order: m.order };
+      }
+    });
+
+    log.info(`move: ${moves.length} card(s) reordered, affecting plugin(s) ${[...pluginIds].join(', ')}.`);
+
+    // Same fire-and-forget immediate refresh as handleAction()/handleEdit()
+    // — the layout page's own 2s /cards poll should show the new order
+    // without waiting for each plugin's normal schedule. A single drag can
+    // touch cards from several plugins at once, so every distinct owner
+    // gets re-polled, not just one.
+    const cfg = loadConfig();
+    for (const pluginId of pluginIds) {
+      const plugin = this.plugins.get(pluginId);
+      if (!plugin) continue;
+      const feedCfg = getFeedConfig(pluginId, { intervalSeconds: plugin.defaultIntervalSeconds });
+      this._poll(plugin, feedCfg, cfg).catch((e) => {
+        log.error(`[${pluginId}] post-move refresh poll failed: ${e.message}`);
+      });
+    }
   }
 
   /** Start the recurring per-feed poll loop, one independent interval per enabled feed. */

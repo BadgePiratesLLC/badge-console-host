@@ -220,6 +220,49 @@ test('handleEdit() throws on a card id no plugin has ever pushed', async () => {
   await assert.rejects(() => runtime.handleEdit('never-pushed', { color: '#000000' }), /No known card owner/);
 });
 
+// Nexus 281ee5a2 slice 3: handleMove() is the drag/reorder half of the
+// same reverse channel (see action-server.mjs's POST /move) — persists
+// each moved card's new `order` the same generic, id-keyed way as the
+// edit route's color/delete overrides.
+
+test('handleMove() applies an order override generically, even for a plugin with no editCardValue', async () => {
+  resetConfigCacheForTests();
+  const plain = fakePlugin({ id: 'move-feed-1', cards: [{ id: 'mv-1', title: 'X' }] });
+  const runtime = new PluginRuntime([plain]);
+  await runtime.runOnce('move-feed-1');
+  await runtime.handleMove([{ id: 'mv-1', order: 3 }]);
+  const result = await runtime.runOnce('move-feed-1');
+  assert.equal(result.cards[0].order, 3);
+});
+
+test('handleMove() reorders cards spanning two different plugins in one call', async () => {
+  resetConfigCacheForTests();
+  const a = fakePlugin({ id: 'move-feed-a', cards: [{ id: 'mv-a1', title: 'A' }] });
+  const b = fakePlugin({ id: 'move-feed-b', cards: [{ id: 'mv-b1', title: 'B' }] });
+  const runtime = new PluginRuntime([a, b]);
+  await runtime.runOnce('move-feed-a');
+  await runtime.runOnce('move-feed-b');
+  await runtime.handleMove([{ id: 'mv-a1', order: 1 }, { id: 'mv-b1', order: 0 }]);
+  const resultA = await runtime.runOnce('move-feed-a');
+  const resultB = await runtime.runOnce('move-feed-b');
+  assert.equal(resultA.cards[0].order, 1);
+  assert.equal(resultB.cards[0].order, 0);
+});
+
+test('handleMove() throws on a card id no plugin has ever pushed', async () => {
+  resetConfigCacheForTests();
+  const runtime = new PluginRuntime([fakePlugin({ id: 'unrelated-3', cards: [] })]);
+  await assert.rejects(() => runtime.handleMove([{ id: 'never-pushed', order: 0 }]), /No known card owner/);
+});
+
+test('handleMove() throws on an empty or malformed moves array', async () => {
+  resetConfigCacheForTests();
+  const runtime = new PluginRuntime([fakePlugin({ id: 'unrelated-4', cards: [] })]);
+  await assert.rejects(() => runtime.handleMove([]), /non-empty array/);
+  await assert.rejects(() => runtime.handleMove([{ id: '', order: 0 }]), /non-empty id/);
+  await assert.rejects(() => runtime.handleMove([{ id: 'x', order: 'not-a-number' }]), /numeric order/);
+});
+
 test('reschedule only arms timers for enabled feeds, respecting minIntervalSeconds', async () => {
   resetConfigCacheForTests();
   const feed = fakePlugin({ id: 'scheduled-feed', cards: [] });
