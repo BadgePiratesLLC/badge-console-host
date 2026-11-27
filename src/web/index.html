@@ -15,6 +15,11 @@
 <section id="badge-section">
   <h2>1. Badge</h2>
   <div id="badge-status" class="status-line">checking…</div>
+  <div id="badge-ota-status" class="status-line"></div>
+  <div class="row" id="badge-ota-actions" style="display:none">
+    <button id="ota-check-btn">Check for update</button>
+    <button id="ota-update-btn" style="display:none">Update now</button>
+  </div>
   <div class="row">
     <label>Badge IP <input id="badge-host" type="text" placeholder="192.168.1.42"></label>
     <label>Port <input id="badge-port" type="number" value="80" style="width:5em"></label>

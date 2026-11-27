@@ -57,6 +57,104 @@ export async function pushCards(host, port, cards, { timeoutMs = 5000, actionPor
 }
 
 /**
+ * GET the badge's own OTA status (Nexus ad98fbf6): the version it's
+ * currently running plus whatever its OtaWorker last found during its
+ * periodic 6h check or an explicit checkBadgeForUpdate() below —
+ * token-gated the same way /cards is. Shape: { currentVersion,
+ * availableVersion: string|null, checking: boolean }.
+ */
+export async function getOtaStatus(host, port, { timeoutMs = 4000 } = {}) {
+  const token = await getBadgeToken();
+  if (!token) throw new Error('Badge is not paired yet — no auth token stored.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(badgeUrl(host, port, '/ota-status'), {
+      headers: { 'X-Auth-Token': token },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Badge rejected /ota-status (HTTP ${res.status})`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * POST /ota-check — ask the badge to re-check its manifest right now
+ * instead of waiting for its own 6h background cycle. Non-blocking on the
+ * badge's side; the result shows up on the NEXT getOtaStatus() call, not
+ * in this one's response.
+ */
+export async function checkBadgeForUpdate(host, port, { timeoutMs = 5000 } = {}) {
+  const token = await getBadgeToken();
+  if (!token) throw new Error('Badge is not paired yet — no auth token stored.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(badgeUrl(host, port, '/ota-check'), {
+      method: 'POST',
+      headers: { 'X-Auth-Token': token },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Badge rejected /ota-check (HTTP ${res.status})`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * POST /ota-update — tell the badge to install whatever version its last
+ * check reported available (409 on the badge's side if nothing is — call
+ * checkBadgeForUpdate()/getOtaStatus() first). Blocks on the badge's side
+ * for the whole download/flash (same full-screen takeover the on-device
+ * tap triggers), and a SUCCESSFUL install restarts the badge mid-response
+ * — the connection just drops rather than the request ever completing
+ * normally. That is indistinguishable from this side from a badge that
+ * went unreachable for any other reason, so it's reported back as
+ * { ok: true, restarted: true } rather than thrown; callers should
+ * re-poll getOtaStatus() a few seconds later to confirm the new version
+ * actually landed instead of trusting this alone. A real failure (the
+ * badge reached its handler and the download/flash itself failed) comes
+ * back as an actual error response and IS thrown.
+ */
+export async function triggerBadgeUpdate(host, port, { timeoutMs = 45000 } = {}) {
+  const token = await getBadgeToken();
+  if (!token) throw new Error('Badge is not paired yet — no auth token stored.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(badgeUrl(host, port, '/ota-update'), {
+      method: 'POST',
+      headers: { 'X-Auth-Token': token },
+      signal: controller.signal,
+    });
+    const text = await res.text().catch(() => '');
+    if (!res.ok) {
+      let reason = text;
+      try { reason = JSON.parse(text).error || text; } catch { /* non-JSON body, use as-is */ }
+      throw new Error(reason || `Badge rejected /ota-update (HTTP ${res.status})`);
+    }
+    return { ok: true };
+  } catch (e) {
+    // A real failure the badge told us about explicitly (the `!res.ok`
+    // branch above) is always a plain Error with a message pulled from
+    // its JSON body — this instead catches fetch() itself failing to get
+    // a response at all (AbortError on timeout, or a TypeError "fetch
+    // failed" wrapping an undici SocketError/connection-refused/reset),
+    // which is exactly what a badge restarting mid-request looks like
+    // from here.
+    if (e.name === 'AbortError' || e instanceof TypeError) {
+      return { ok: true, restarted: true, note: 'Connection dropped — the badge is likely restarting into the new version.' };
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Pairing (Nexus 2f45b023): exchange the 6-digit code shown on the badge's
  * own Pair screen for its long-lived device token, over POST /pair. The
  * human never sees or types that token — this is the one function that
