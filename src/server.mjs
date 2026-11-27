@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import sea from 'node:sea';
 import { loadConfig, saveConfig, updateConfig, getFeedConfig } from './config-store.mjs';
 import { setSecret, deleteSecret, hasSecret } from './credential-store.mjs';
-import { exchangePairCode, setBadgeToken } from './badge-client.mjs';
+import { exchangePairCode, setBadgeToken, getOtaStatus, checkBadgeForUpdate, triggerBadgeUpdate } from './badge-client.mjs';
 import { browse as mdnsBrowse } from './mdns.mjs';
 import { PluginRuntime } from './plugin-runtime.mjs';
 import { start as startActionServer } from './action-server.mjs';
@@ -183,6 +183,45 @@ async function handleApi(req, res, pathname) {
     runtime.reschedule();
     log.info(`Paired with badge at ${host}:${port || 80}.`);
     return sendJson(res, 200, { ok: true });
+  }
+
+  // --- Badge OTA (Nexus ad98fbf6) — remote "check/apply update now" for
+  // the one paired badge, token-gated the same way /cards is (see
+  // badge-client.mjs). Jared: "ends Kevin power-cycling for every
+  // release." ---
+  if (pathname === '/api/badge/ota-status' && req.method === 'GET') {
+    const cfg = loadConfig();
+    if (!cfg.badge.paired) return sendJson(res, 409, { error: 'badge is not paired yet' });
+    try {
+      const status = await getOtaStatus(cfg.badge.host, cfg.badge.port);
+      return sendJson(res, 200, status);
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message });
+    }
+  }
+
+  if (pathname === '/api/badge/ota-check' && req.method === 'POST') {
+    const cfg = loadConfig();
+    if (!cfg.badge.paired) return sendJson(res, 409, { error: 'badge is not paired yet' });
+    try {
+      const result = await checkBadgeForUpdate(cfg.badge.host, cfg.badge.port);
+      return sendJson(res, 200, result);
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message });
+    }
+  }
+
+  if (pathname === '/api/badge/ota-update' && req.method === 'POST') {
+    const cfg = loadConfig();
+    if (!cfg.badge.paired) return sendJson(res, 409, { error: 'badge is not paired yet' });
+    try {
+      const result = await triggerBadgeUpdate(cfg.badge.host, cfg.badge.port);
+      log.info(`Badge OTA update triggered for ${cfg.badge.host}:${cfg.badge.port}.${result.restarted ? ' (badge restarted mid-response)' : ''}`);
+      return sendJson(res, 200, result);
+    } catch (e) {
+      log.error(`Badge OTA update failed for ${cfg.badge.host}:${cfg.badge.port}: ${e.message}`);
+      return sendJson(res, 502, { ok: false, error: e.message });
+    }
   }
 
   return null; // not an API route

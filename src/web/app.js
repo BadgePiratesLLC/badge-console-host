@@ -28,6 +28,12 @@ async function loadState() {
   const state = await api('/api/state');
   renderBadge(state.badge);
   renderFeeds(state.feeds);
+  if (state.badge.paired) {
+    loadOtaStatus();
+  } else {
+    document.getElementById('badge-ota-actions').style.display = 'none';
+    document.getElementById('badge-ota-status').textContent = '';
+  }
 }
 
 function renderBadge(badge) {
@@ -40,6 +46,40 @@ function renderBadge(badge) {
   } else {
     el.textContent = 'Not paired yet — on the badge, open Cards and press Pair, then enter the badge’s IP and the 6-digit code shown here.';
     el.className = 'status-line warn';
+  }
+}
+
+// Nexus ad98fbf6: the badge's own OTA status (current version, plus
+// whatever its OtaWorker last found during its 6h background check or an
+// explicit "Check for update" click below), re-fetched every loadState()
+// tick (same 10s loop below) once the badge is paired.
+async function loadOtaStatus() {
+  const statusEl = document.getElementById('badge-ota-status');
+  const actionsEl = document.getElementById('badge-ota-actions');
+  const updateBtn = document.getElementById('ota-update-btn');
+  try {
+    const status = await api('/api/badge/ota-status');
+    actionsEl.style.display = '';
+    if (status.availableVersion) {
+      statusEl.textContent = `Firmware v${status.currentVersion} — update available: v${status.availableVersion}.`;
+      statusEl.className = 'status-line warn';
+      updateBtn.textContent = `Update now (v${status.availableVersion})`;
+      updateBtn.style.display = '';
+    } else if (status.checking) {
+      statusEl.textContent = `Firmware v${status.currentVersion} — checking for updates…`;
+      statusEl.className = 'status-line';
+      updateBtn.style.display = 'none';
+    } else {
+      statusEl.textContent = `Firmware v${status.currentVersion} — up to date.`;
+      statusEl.className = 'status-line ok';
+      updateBtn.style.display = 'none';
+    }
+  } catch (e) {
+    // Badge briefly unreachable (asleep, rebooting, off Wi-Fi) shouldn't
+    // nuke the rest of the page — just go quiet about OTA until it
+    // answers again on the next loadState() tick.
+    actionsEl.style.display = 'none';
+    statusEl.textContent = '';
   }
 }
 
@@ -325,6 +365,46 @@ document.getElementById('discover-btn').addEventListener('click', async () => {
   document.getElementById('badge-host').value = results[0].host;
   document.getElementById('badge-port').value = results[0].port;
   resultEl.textContent = `Found ${results[0].host}:${results[0].port} — paste the token from its portal and click Pair.`;
+});
+
+document.getElementById('ota-check-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('badge-ota-status');
+  statusEl.textContent = 'Checking for updates…';
+  statusEl.className = 'status-line';
+  try {
+    await api('/api/badge/ota-check', { method: 'POST' });
+    // Non-blocking on the badge's side — give its manifest GET a moment
+    // to land before polling the result instead of racing it.
+    setTimeout(loadOtaStatus, 3000);
+  } catch (e) {
+    statusEl.textContent = `Check failed: ${e.message}`;
+    statusEl.className = 'status-line warn';
+  }
+});
+
+document.getElementById('ota-update-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('badge-ota-status');
+  const btn = document.getElementById('ota-update-btn');
+  if (!confirm('Install this update on the badge now? It will be unusable for a minute or two while it downloads, flashes, and restarts.')) {
+    return;
+  }
+  btn.disabled = true;
+  statusEl.textContent = 'Installing — the badge screen will show progress…';
+  statusEl.className = 'status-line';
+  try {
+    const result = await api('/api/badge/ota-update', { method: 'POST' });
+    statusEl.textContent = result.restarted
+      ? 'Badge connection dropped — it is likely restarting into the new version.'
+      : 'Update finished.';
+    statusEl.className = 'status-line ok';
+  } catch (e) {
+    statusEl.textContent = `Update failed: ${e.message}`;
+    statusEl.className = 'status-line warn';
+  } finally {
+    btn.disabled = false;
+    // Give a restart time to actually finish before re-polling status.
+    setTimeout(loadOtaStatus, 10000);
+  }
 });
 
 loadState();
