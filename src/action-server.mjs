@@ -11,6 +11,20 @@
 // body {"id": "<card id>"}. 401 on a missing/wrong token, 404 if the id
 // isn't a card any plugin currently owns (or that plugin has no
 // onAction), 200 on success, 502 if the plugin's onAction() throws.
+//
+// Nexus 281ee5a2 slice 2/3: POST /edit is the second half of the same
+// reverse channel — the badge-served /layout page's tap-to-edit-in-place,
+// recolor, and delete, relayed here by the firmware's own /tile-edit
+// handler (QACode_27's UsageServer.cpp) over this same host/port/token.
+// Same auth and body shape as /action, plus the edit fields: body
+// {"id": "<card id>", "value"?: "<new value>", "color"?: "#RRGGBB",
+// "delete"?: true}. Routed to PluginRuntime.handleEdit(). This was the
+// one piece the firmware side of slice 2 shipped without: UsageServer.cpp
+// has been calling ActionClient::sendEdit() -> POST /edit since 16cd862,
+// and until this route existed every edit made on the badge's own layout
+// page 404'd back to it (this listener answered only /action, everything
+// else fell into the 404 branch below) — the edit never actually did
+// anything past the badge's own 200 to the browser.
 
 import http from 'node:http';
 import { getBadgeToken } from './badge-client.mjs';
@@ -40,14 +54,17 @@ export function createActionServer(runtime) {
   return http.createServer(async (req, res) => {
     const remote = req.socket.remoteAddress;
     const url = new URL(req.url, 'http://0.0.0.0');
-    if (req.method !== 'POST' || url.pathname !== '/action') {
+    const kind = req.method === 'POST' && url.pathname === '/action' ? 'action'
+      : req.method === 'POST' && url.pathname === '/edit' ? 'edit'
+      : null;
+    if (!kind) {
       log.info(`action listener: ignored ${req.method} ${url.pathname} from ${remote}`);
       return sendJson(res, 404, { error: 'not found' });
     }
 
     const token = await getBadgeToken();
     if (!token || req.headers['x-auth-token'] !== token) {
-      log.info(`action request from ${remote} rejected: bad or missing X-Auth-Token`);
+      log.info(`${kind} request from ${remote} rejected: bad or missing X-Auth-Token`);
       return sendJson(res, 401, { error: 'bad or missing X-Auth-Token' });
     }
 
@@ -55,22 +72,35 @@ export function createActionServer(runtime) {
     try {
       body = await readJsonBody(req);
     } catch {
-      log.info(`action request from ${remote} rejected: bad json body`);
+      log.info(`${kind} request from ${remote} rejected: bad json body`);
       return sendJson(res, 400, { error: 'bad json' });
     }
     if (!body.id || typeof body.id !== 'string') {
-      log.info(`action request from ${remote} rejected: missing id`);
+      log.info(`${kind} request from ${remote} rejected: missing id`);
       return sendJson(res, 400, { error: 'missing id' });
     }
 
-    log.info(`action request from ${remote}: id "${body.id}" received`);
+    if (kind === 'action') {
+      log.info(`action request from ${remote}: id "${body.id}" received`);
+      try {
+        await runtime.handleAction(body.id);
+        log.info(`action "${body.id}" from ${remote}: ok`);
+        return sendJson(res, 200, { ok: true });
+      } catch (e) {
+        log.error(`action "${body.id}" from ${remote}: failed: ${e.message}`);
+        const notFound = /no known card owner|has no onAction/i.test(e.message);
+        return sendJson(res, notFound ? 404 : 502, { ok: false, error: e.message });
+      }
+    }
+
+    log.info(`edit request from ${remote}: id "${body.id}" (value=${'value' in body}, color=${'color' in body}, delete=${!!body.delete})`);
     try {
-      await runtime.handleAction(body.id);
-      log.info(`action "${body.id}" from ${remote}: ok`);
+      await runtime.handleEdit(body.id, body);
+      log.info(`edit "${body.id}" from ${remote}: ok`);
       return sendJson(res, 200, { ok: true });
     } catch (e) {
-      log.error(`action "${body.id}" from ${remote}: failed: ${e.message}`);
-      const notFound = /no known card owner|has no onAction/i.test(e.message);
+      log.error(`edit "${body.id}" from ${remote}: failed: ${e.message}`);
+      const notFound = /no known card owner|no editable slot|doesn't support editing/i.test(e.message);
       return sendJson(res, notFound ? 404 : 502, { ok: false, error: e.message });
     }
   });
