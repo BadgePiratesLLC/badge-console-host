@@ -12,6 +12,8 @@ import {
   description,
   isMarketOpen,
   _resetCacheForTests,
+  editCardValue,
+  removeCardValue,
 } from '../src/plugins/stocks.mjs';
 
 function withMockFetch(handler, fn) {
@@ -271,4 +273,31 @@ test('with no symbols setting at all, defaults to AAPL', async (t) => {
 test('stocks plugin description advertises the keyless default, not a required key', () => {
   assert.doesNotMatch(description, /no key stored/i);
   assert.match(description, /keyless/i);
+});
+
+// Nexus 281ee5a2 slice 2/3: editCardValue/removeCardValue are what
+// plugin-runtime.mjs's handleEdit() calls for the badge-served layout
+// editor's tap-to-edit and delete — same index-into-the-comma-joined-
+// string mechanics as the Feeds page's renderSymbolListSetting (app.js).
+
+test('editCardValue replaces the matching symbol slot, not append', () => {
+  const next = editCardValue({ symbols: 'AAPL,TSLA' }, 'stocks-tsla', 'googl');
+  assert.equal(next.symbols, 'AAPL,GOOGL');
+});
+
+test('editCardValue returns null for a card id that is not one of this plugin\'s slots', () => {
+  assert.equal(editCardValue({ symbols: 'AAPL,TSLA' }, 'stocks-msft', 'GOOGL'), null);
+});
+
+test('editCardValue returns null for a blank new value, leaving the slot alone', () => {
+  assert.equal(editCardValue({ symbols: 'AAPL,TSLA' }, 'stocks-tsla', '   '), null);
+});
+
+test('removeCardValue drops the matching slot and rejoins the rest', () => {
+  const next = removeCardValue({ symbols: 'AAPL,TSLA,MSFT' }, 'stocks-tsla');
+  assert.equal(next.symbols, 'AAPL,MSFT');
+});
+
+test('removeCardValue returns null for an unknown card id', () => {
+  assert.equal(removeCardValue({ symbols: 'AAPL' }, 'stocks-tsla'), null);
 });

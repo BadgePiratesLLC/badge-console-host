@@ -48,6 +48,109 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.bin }}
 
+  # Nexus b1ad1a04: a buyer should never see a bare CLI binary — a real
+  # one-click installer per OS, wrapping the exact binary `build` just
+  # smoke-tested (never rebuilt here), matching the install/ one-liners'
+  # "no Node, no terminal needed again" bar but with the OS's own native
+  # install UX (Start Menu entry + Task Scheduler checkbox on Windows, a
+  # drag-to-Applications .dmg on macOS, a dpkg-tracked .deb on Linux).
+  # Smoke-tests the INSTALLED artifact too, not just the raw binary — that
+  # distinction is exactly what let Nexus bcae3a08 ship broken twice (see
+  # `build`'s sea-smoke step above), so the same discipline applies one
+  # layer up.
+  package-installers:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: macos-latest
+            platform: macos
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compute version (strip leading v from the tag, or 0.0.0-dev off-tag)
+        id: ver
+        shell: bash
+        run: |
+          ref="${{ github.ref_name }}"
+          if [[ "$ref" == v* ]]; then echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
+          else echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Windows binary
+        if: matrix.platform == 'windows'
+        uses: actions/download-artifact@v4
+        with: { name: badge-console-host-windows, path: artifacts }
+      - name: Build Windows installer (Inno Setup)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            /DBchVersion="${{ steps.ver.outputs.version }}" `
+            /DBchSourceExe="$PWD\artifacts\badge-console-host.exe" `
+            installer\windows\setup.iss
+      - name: Smoke-test the installed Windows artifact (not just the raw exe)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          # Unchecked startatlogin task so this CI run never registers a
+          # Task Scheduler entry on the runner. PrivilegesRequired=lowest
+          # in setup.iss means a non-admin run lands under %LOCALAPPDATA%.
+          Start-Process -Wait -FilePath "dist\badge-console-host-Setup.exe" `
+            -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER','/TASKS='
+          $installed = Get-ChildItem -Recurse -Filter badge-console-host.exe -Path "$env:LOCALAPPDATA\Programs","$env:ProgramFiles","${env:ProgramFiles(x86)}" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $installed) { Write-Error "installer did not land badge-console-host.exe anywhere searched"; exit 1 }
+          node scripts/sea-smoke.mjs $installed.FullName
+      - uses: actions/upload-artifact@v4
+        if: matrix.platform == 'windows'
+        with: { name: badge-console-host-installer-windows, path: dist/badge-console-host-Setup.exe }
+
+      - name: Download macOS binary
+        if: matrix.platform == 'macos'
+        uses: actions/download-artifact@v4
+        with: { name: badge-console-host-macos, path: artifacts }
+      - name: Build macOS .dmg
+        if: matrix.platform == 'macos'
+        run: |
+          chmod +x artifacts/badge-console-host
+          sh installer/macos/build-dmg.sh artifacts/badge-console-host "${{ steps.ver.outputs.version }}"
+      - name: Smoke-test the installed macOS artifact (not just the raw binary)
+        if: matrix.platform == 'macos'
+        run: |
+          hdiutil attach dist/badge-console-host.dmg -nobrowse -mountpoint /tmp/bch-dmg
+          cp -R "/tmp/bch-dmg/Badge Console Host.app" /tmp/
+          hdiutil detach /tmp/bch-dmg
+          node scripts/sea-smoke.mjs "/tmp/Badge Console Host.app/Contents/MacOS/badge-console-host-bin"
+      - uses: actions/upload-artifact@v4
+        if: matrix.platform == 'macos'
+        with: { name: badge-console-host-installer-macos, path: dist/badge-console-host.dmg }
+
+      - name: Download Linux binary
+        if: matrix.platform == 'linux'
+        uses: actions/download-artifact@v4
+        with: { name: badge-console-host-linux, path: artifacts }
+      - name: Build Linux .deb
+        if: matrix.platform == 'linux'
+        run: |
+          chmod +x artifacts/badge-console-host
+          sh installer/linux/build-deb.sh artifacts/badge-console-host "${{ steps.ver.outputs.version }}"
+      - name: Smoke-test the installed Linux artifact (not just the raw binary)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo dpkg -i dist/badge-console-host.deb
+          node scripts/sea-smoke.mjs /usr/share/badge-console-host/badge-console-host-bin
+      - uses: actions/upload-artifact@v4
+        if: matrix.platform == 'linux'
+        with: { name: badge-console-host-installer-linux, path: dist/badge-console-host.deb }
+
   # install.sh / install.ps1 both fetch from releases/<repo>/latest/download/<asset> —
   # a URL that only resolves once a GitHub Release exists with matching asset
   # names attached. Without this job, every build here was a CI artifact only
@@ -57,7 +160,7 @@ jobs:
   # manual workflow_dispatch (used to smoke-test the build matrix) never cuts
   # a release by accident.
   publish-release:
-    needs: build
+    needs: [build, package-installers]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -66,12 +169,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Stage release assets under the names install.sh / install.ps1 expect
+      - name: Stage release assets under the names install.sh / install.ps1 / the download page expect
         run: |
           mkdir -p release
           cp artifacts/badge-console-host-macos/badge-console-host release/badge-console-host-macos
           cp artifacts/badge-console-host-linux/badge-console-host release/badge-console-host-linux
           cp artifacts/badge-console-host-windows/badge-console-host.exe release/badge-console-host-windows.exe
+          cp artifacts/badge-console-host-installer-windows/badge-console-host-Setup.exe release/badge-console-host-Setup.exe
+          cp artifacts/badge-console-host-installer-macos/badge-console-host.dmg release/badge-console-host.dmg
+          cp artifacts/badge-console-host-installer-linux/badge-console-host.deb release/badge-console-host.deb
           chmod +x release/badge-console-host-macos release/badge-console-host-linux
       - uses: softprops/action-gh-release@v2
         with:

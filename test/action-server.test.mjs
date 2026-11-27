@@ -21,11 +21,11 @@ function fakeRuntime(handler) {
   return { handleAction: handler };
 }
 
-async function post(server, { headers = {}, body } = {}) {
+async function post(server, { headers = {}, body, path = '/action' } = {}) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/action`, {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
@@ -80,4 +80,66 @@ test('a body with no id is rejected with 400 once auth has passed', async () => 
   const server = createActionServer(fakeRuntime(async () => {}));
   const res = await post(server, { headers: { 'X-Auth-Token': 'real-token' }, body: {} });
   assert.equal(res.status, 400);
+});
+
+// Nexus 281ee5a2 slice 2/3: POST /edit is the badge-served layout
+// editor's tap-to-edit/recolor/delete relay, same auth gate as /action —
+// before this route existed, the firmware's /tile-edit forward (shipped
+// with slice 2) 404'd here since this listener only ever answered
+// /action.
+
+function fakeEditRuntime(handler) {
+  return { handleAction: async () => { throw new Error('not used in these tests'); }, handleEdit: handler };
+}
+
+test('an /edit request with a missing X-Auth-Token is refused with 401 and never reaches the runtime', async () => {
+  await setBadgeToken('real-token');
+  let called = false;
+  const server = createActionServer(fakeEditRuntime(async () => { called = true; }));
+  const res = await post(server, { path: '/edit', body: { id: 'card-1', color: '#abcdef' } });
+  assert.equal(res.status, 401);
+  assert.equal(called, false);
+});
+
+test('the right token with a known card id calls runtime.handleEdit with the full body and returns 200', async () => {
+  await setBadgeToken('real-token');
+  const calls = [];
+  const server = createActionServer(fakeEditRuntime(async (id, edit) => { calls.push([id, edit]); }));
+  const res = await post(server, {
+    path: '/edit',
+    headers: { 'X-Auth-Token': 'real-token' },
+    body: { id: 'card-1', color: '#abcdef' },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(calls, [['card-1', { id: 'card-1', color: '#abcdef' }]]);
+});
+
+test('an /edit on an unknown card id surfaces as 404', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeEditRuntime(async () => { throw new Error('No known card owner for id "x".'); }));
+  const res = await post(server, { path: '/edit', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'x', color: '#000000' } });
+  assert.equal(res.status, 404);
+});
+
+test('an /edit value edit the owning plugin does not support surfaces as 404, not 502', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeEditRuntime(async () => { throw new Error('Plugin "weather" doesn\'t support editing card "x"\'s value yet.'); }));
+  const res = await post(server, { path: '/edit', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'x', value: 'y' } });
+  assert.equal(res.status, 404);
+});
+
+test('an /edit body with no id is rejected with 400 once auth has passed', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeEditRuntime(async () => {}));
+  const res = await post(server, { path: '/edit', headers: { 'X-Auth-Token': 'real-token' }, body: { color: '#000000' } });
+  assert.equal(res.status, 400);
+});
+
+test('an unrouted path still 404s without reaching the runtime', async () => {
+  await setBadgeToken('real-token');
+  let called = false;
+  const server = createActionServer(fakeEditRuntime(async () => { called = true; }));
+  const res = await post(server, { path: '/nope', headers: { 'X-Auth-Token': 'real-token' }, body: { id: 'x' } });
+  assert.equal(res.status, 404);
+  assert.equal(called, false);
 });
