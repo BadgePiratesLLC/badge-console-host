@@ -12,43 +12,41 @@ Nexus 3a6a69b5. Depends on the card schema (Nexus 7c9c1a15, QACode_27
 
 ## For a buyer: install
 
-**Easiest — a real installer, no terminal at all (Nexus b1ad1a04):**
-grab the one for your OS from the
-[latest release](https://github.com/BadgePiratesLLC/badge-console-host/releases/latest):
+**Download and run — no terminal, no scripts:** grab the binary for your
+OS from the [latest release](https://github.com/BadgePiratesLLC/badge-console-host/releases/latest)
+and run it directly. None of these need Node installed — the runtime is
+bundled in.
 
-- **Windows:** `badge-console-host-Setup.exe` — double-click, optionally
-  leave "start at login" checked, it opens
-  **http://127.0.0.1:4173** when done. First run shows Windows SmartScreen's
-  "protected your PC" warning (installer is currently unsigned — see
+- **Windows:** download `badge-console-host-windows.exe`, then
+  double-click it to run. First run shows Windows SmartScreen's
+  "protected your PC" warning (the binary is currently unsigned — see
   `docs/DECISIONS.md` "Code signing" for the cost/options to fix that);
   click "More info → Run anyway."
-- **macOS:** `badge-console-host.dmg` — open it, drag **Badge Console
-  Host** to Applications, open it from there (Gatekeeper will say it's from
-  an unidentified developer the first time — right-click → Open once).
-- **Linux:** `badge-console-host.deb` — `sudo dpkg -i badge-console-host.deb`,
-  then launch **Badge Console Host** from your app menu, or run
-  `badge-console-host` from a terminal.
+- **macOS:** download `badge-console-host-macos`, then from a terminal in
+  the download folder run `chmod +x badge-console-host-macos &&
+  ./badge-console-host-macos` (Gatekeeper will say it's from an
+  unidentified developer the first time — right-click → Open once instead
+  if you'd rather not use a terminal).
+- **Linux:** download `badge-console-host-linux`, then
+  `chmod +x badge-console-host-linux && ./badge-console-host-linux`.
 
-None of these need Node installed — the runtime is bundled in.
+None of these need Node installed — the runtime is bundled in. Running
+the binary opens nothing by itself — go to **http://127.0.0.1:4173** in a
+browser to pair your badge and turn on feeds.
 
-**Or, the one-line terminal install** (same bundled binary, registers
-autostart unconditionally, no GUI):
+A packaged one-click installer with a Start Menu entry, autostart, and a
+`.dmg`/`.deb` (Nexus b1ad1a04) is in progress but not yet released — this
+page will switch to that once it ships. Until then, macOS/Linux also have
+a one-line terminal install (same bundled binary, but registers autostart
+unconditionally):
 
-macOS / Linux:
 ```
 curl -fsSL https://raw.githubusercontent.com/BadgePiratesLLC/badge-console-host/main/install/install.sh | sh
 ```
 
-Windows (PowerShell, no admin needed):
-```
-iwr https://raw.githubusercontent.com/BadgePiratesLLC/badge-console-host/main/install/install.ps1 -UseBasicParsing | iex
-```
-
-Either path installs a single binary and opens nothing by itself unless
-you used the GUI installer above — go to **http://127.0.0.1:4173** in a
-browser to pair your badge and turn on feeds. *(Releases aren't published
-yet — see "Status" below; the repo itself is also still private, see
-Nexus 129c50c9.)*
+There is no Windows one-liner — piping a downloaded script into `iex` is
+exactly the pattern buyers should be wary of, so Windows installs by
+downloading and running the `.exe` above instead.
 
 Once running, the config page checks GitHub Releases for a newer version
 once a day and shows a banner with a download link if one exists — it
@@ -221,14 +219,15 @@ per-feed display-order UI, and file-backed logging — a buyer running
 matches `main`. No other packaging gap changed since Sept 24 — the repo
 visibility blocker below still stands.
 
+**2026-11-27 update:** the repo is now public (Kevin's call, Nexus
+6b266879/129c50c9) — `raw.githubusercontent.com` and
+`releases/.../download/...` both confirmed `200` for an unauthenticated
+request. The git history was scanned (`gitleaks detect --log-opts="--all"`
+across all branches/tags) before the flip; no leaks found. Every URL in
+this README's "install" section is now actually reachable by a buyer.
+
 **Not yet verified:**
 
-- **The repo is private.** `raw.githubusercontent.com` and
-  `releases/.../download/...` both 404 for an unauthenticated request
-  against a private repo — confirmed live. Every URL in this README's
-  "install" section is unreachable by an actual buyer until this repo is
-  made public. This is the current #1 blocker on the whole packaging
-  phase; making it public is Kevin's call, not this session's.
 - Against a real, physical CC13 badge running the card-schema firmware
   (firmware side isn't currently building on GAMINGCRAP — separate
   blocker, see Nexus 7c9c1a15).
@@ -241,8 +240,8 @@ visibility blocker below still stands.
 - mDNS badge discovery — the client is real and packet-tested
   (`test/mdns.test.mjs`), but inert until the badge firmware advertises a
   service (it doesn't yet; typed-IP pairing is the path that works today).
-- No installer has been run on a genuinely fresh machine end-to-end (and
-  can't be, publicly, until the repo is public).
+- No installer has been run on a genuinely fresh machine end-to-end yet —
+  now possible publicly, just not done in this session.
 
 None of that is hidden inside the code — every gap above has a matching
 note in `docs/DECISIONS.md` at the point it matters.
