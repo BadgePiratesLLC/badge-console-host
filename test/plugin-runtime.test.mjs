@@ -295,6 +295,49 @@ test('handleEdit() explicitly removes the stale old-id card from the badge when 
   assert.equal(removal.remove, true);
 });
 
+test('a plain runOnce() cleans up an id the plugin stops pushing, not just an explicit layout-editor edit (Nexus cbadc3da)', async (t) => {
+  resetConfigCacheForTests();
+  await setBadgeToken('test-token-shrink');
+  const badge = fakeBadgeServer();
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => badge.server.close(resolve));
+    updateConfig((cfg) => { cfg.badge.host = ''; cfg.badge.port = 80; });
+  });
+  updateConfig((cfg) => {
+    cfg.badge.host = '127.0.0.1';
+    cfg.badge.port = badge.server.address().port;
+  });
+
+  // Simulates a feed whose settings changed outside the layout editor
+  // (e.g. a buyer unchecked a Feeds-page entity, or a direct HA watch-list
+  // swap) — the SAME plugin instance just starts pushing fewer cards on
+  // its own next scheduled poll, with nothing routed through handleEdit().
+  let shrink = false;
+  const shrinking = {
+    id: 'shrinking-feed',
+    label: 'shrinking-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    credentialsSchema: [],
+    settingsSchema: [],
+    async poll() {
+      return { cards: shrink ? [{ id: 'keep-1', title: 'A' }] : [{ id: 'keep-1', title: 'A' }, { id: 'drop-1', title: 'B' }] };
+    },
+  };
+  const runtime = new PluginRuntime([shrinking]);
+  await runtime.runOnce('shrinking-feed'); // pushes keep-1 + drop-1, populates cardOwner for both
+  badge.received.length = 0;
+
+  shrink = true;
+  await runtime.runOnce('shrinking-feed'); // same plugin, same schedule — just a smaller result this time
+
+  const removal = badge.received.flat().find((c) => c.id === 'drop-1');
+  assert.ok(removal, `expected a push removing dropped id drop-1: ${JSON.stringify(badge.received)}`);
+  assert.equal(removal.remove, true);
+  await assert.rejects(() => runtime.handleAction('drop-1'), /No known card owner/);
+});
+
 test('handleEdit() does not emit a stale-id removal when the edited card keeps the same id', async (t) => {
   resetConfigCacheForTests();
   await setBadgeToken('test-token-2');
