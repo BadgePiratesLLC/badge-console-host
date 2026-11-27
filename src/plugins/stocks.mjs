@@ -233,6 +233,21 @@ export function removeCardValue(settings, cardId) {
   return { ...settings, symbols: next.join(',') };
 }
 
+// Nexus 281ee5a2 slice 4: the layout editor's "+ Add" empty-slot flow
+// (plugin-runtime.mjs's handleAdd). `value` is whatever the buyer typed
+// on the badge — a ticker symbol. Enforces the same 3-symbol cap the
+// settingsSchema's `max` already advertises on the Feeds page, and
+// rejects a symbol already tracked instead of silently duplicating it
+// (two tiles racing to update the same quote would just be confusing).
+export function addCardValue(settings, value) {
+  const { symbols } = findSymbolIndex(settings, '');
+  const cleaned = String(value || '').trim().toUpperCase();
+  if (!cleaned) throw new Error('Enter a ticker symbol.');
+  if (symbols.length >= 3) throw new Error('Already have 3 stock symbols (max) — remove one first.');
+  if (symbols.includes(cleaned)) throw new Error(`"${cleaned}" is already added.`);
+  return { ...settings, symbols: [...symbols, cleaned].join(',') };
+}
+
 export async function poll(ctx) {
   const symbols = parseSymbols(ctx.settings);
   const apiKey = await ctx.getSecret('finnhub-api-key');

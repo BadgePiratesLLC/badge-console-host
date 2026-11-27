@@ -26,6 +26,7 @@ import * as stocks from './plugins/stocks.mjs';
 import * as sports from './plugins/sports.mjs';
 import * as weather from './plugins/weather.mjs';
 import * as homeassistant from './plugins/homeassistant.mjs';
+import * as worldclock from './plugins/worldclock.mjs';
 
 // esbuild empties out import.meta (see scripts/build-sea.mjs) when
 // bundling this file to CJS for the SEA build, so fileURLToPath(undefined)
@@ -43,7 +44,7 @@ const WEB_DIR = path.join(__dirname, 'web');
 const SERVICE = 'badge-console-host';
 const ACTION_PORT = Number(process.env.BADGE_CONSOLE_ACTION_PORT || 4174);
 
-const PLUGINS = [openclaw, anthropic, openai, stocks, sports, weather, homeassistant];
+const PLUGINS = [openclaw, anthropic, openai, stocks, sports, weather, homeassistant, worldclock];
 export const runtime = new PluginRuntime(PLUGINS, { actionPort: ACTION_PORT });
 
 let actionServer = null;

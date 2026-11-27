@@ -263,6 +263,67 @@ test('handleMove() throws on an empty or malformed moves array', async () => {
   await assert.rejects(() => runtime.handleMove([{ id: 'x', order: 'not-a-number' }]), /numeric order/);
 });
 
+// Nexus 281ee5a2 slice 4: handleAdd() is the "+ Add" empty-slot half of
+// the same reverse channel (see action-server.mjs's POST /add) — unlike
+// handleEdit()/handleMove() there is no generic fallback, since a
+// brand-new card has no id yet for a generic override to key off.
+
+test('handleAdd() throws on an unknown plugin id', async () => {
+  resetConfigCacheForTests();
+  const runtime = new PluginRuntime([fakePlugin({ id: 'unrelated-5', cards: [] })]);
+  await assert.rejects(() => runtime.handleAdd('no-such-plugin', 'x'), /No such plugin/);
+});
+
+test('handleAdd() throws when the plugin has no addCardValue', async () => {
+  resetConfigCacheForTests();
+  const plain = fakePlugin({ id: 'no-add-feed', cards: [{ id: 'plain-4', title: 'X' }] });
+  const runtime = new PluginRuntime([plain]);
+  await assert.rejects(() => runtime.handleAdd('no-add-feed', 'x'), /doesn't support adding/);
+});
+
+test('handleAdd() routes through the plugin\'s addCardValue and persists the result', async () => {
+  resetConfigCacheForTests();
+  const calls = [];
+  const addable = {
+    id: 'addable-feed',
+    label: 'addable-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    credentialsSchema: [],
+    settingsSchema: [],
+    async poll(ctx) {
+      const symbols = (ctx.settings.symbols || '').split(',').filter(Boolean);
+      return { cards: symbols.map((s) => ({ id: `add-${s.toLowerCase()}`, title: s })) };
+    },
+    addCardValue(settings, value) {
+      calls.push(value);
+      const symbols = (settings.symbols || '').split(',').filter(Boolean);
+      return { ...settings, symbols: [...symbols, value.toUpperCase()].join(',') };
+    },
+  };
+  const runtime = new PluginRuntime([addable]);
+  await runtime.handleAdd('addable-feed', 'tsla');
+  assert.deepEqual(calls, ['tsla']);
+  const result = await runtime.runOnce('addable-feed');
+  assert.deepEqual(result.cards.map((c) => c.id), ['add-tsla']);
+});
+
+test('handleAdd() lets addCardValue\'s rejection (e.g. max reached) propagate as-is', async () => {
+  resetConfigCacheForTests();
+  const capped = {
+    id: 'capped-feed',
+    label: 'capped-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    credentialsSchema: [],
+    settingsSchema: [],
+    async poll() { return { cards: [] }; },
+    addCardValue() { throw new Error('Already have 3 symbols (max) — remove one first.'); },
+  };
+  const runtime = new PluginRuntime([capped]);
+  await assert.rejects(() => runtime.handleAdd('capped-feed', 'x'), /already have 3/i);
+});
+
 test('reschedule only arms timers for enabled feeds, respecting minIntervalSeconds', async () => {
   resetConfigCacheForTests();
   const feed = fakePlugin({ id: 'scheduled-feed', cards: [] });

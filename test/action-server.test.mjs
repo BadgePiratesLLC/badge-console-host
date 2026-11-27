@@ -187,3 +187,64 @@ test('an unrouted path still 404s without reaching the runtime', async () => {
   assert.equal(res.status, 404);
   assert.equal(called, false);
 });
+
+// Nexus 281ee5a2 slice 4: POST /add is the badge-served layout editor's
+// "+ Add" empty-slot relay. No top-level `id` (the card doesn't exist
+// yet) — carries {pluginId, value} instead, same reverse channel as
+// /edit and /move.
+
+function fakeAddRuntime(handler) {
+  return { handleAction: async () => { throw new Error('not used in these tests'); }, handleAdd: handler };
+}
+
+test('an /add request with a missing X-Auth-Token is refused with 401 and never reaches the runtime', async () => {
+  await setBadgeToken('real-token');
+  let called = false;
+  const server = createActionServer(fakeAddRuntime(async () => { called = true; }));
+  const res = await post(server, { path: '/add', body: { pluginId: 'stocks', value: 'TSLA' } });
+  assert.equal(res.status, 401);
+  assert.equal(called, false);
+});
+
+test('the right token with a pluginId and value calls runtime.handleAdd and returns 200', async () => {
+  await setBadgeToken('real-token');
+  const calls = [];
+  const server = createActionServer(fakeAddRuntime(async (pluginId, value) => { calls.push([pluginId, value]); }));
+  const res = await post(server, {
+    path: '/add',
+    headers: { 'X-Auth-Token': 'real-token' },
+    body: { pluginId: 'stocks', value: 'TSLA' },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(calls, [['stocks', 'TSLA']]);
+});
+
+test('an /add for an unknown plugin surfaces as 404', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeAddRuntime(async () => { throw new Error('No such plugin: "x".'); }));
+  const res = await post(server, { path: '/add', headers: { 'X-Auth-Token': 'real-token' }, body: { pluginId: 'x', value: 'y' } });
+  assert.equal(res.status, 404);
+});
+
+test('an /add for a plugin that does not support adding surfaces as 404', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeAddRuntime(async () => { throw new Error('Plugin "weather" doesn\'t support adding cards yet.'); }));
+  const res = await post(server, { path: '/add', headers: { 'X-Auth-Token': 'real-token' }, body: { pluginId: 'weather', value: 'y' } });
+  assert.equal(res.status, 404);
+});
+
+test('an /add rejected by the plugin itself (e.g. max reached) surfaces as 400, not 502', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeAddRuntime(async () => { throw new Error('Already have 3 symbols (max) — remove one first.'); }));
+  const res = await post(server, { path: '/add', headers: { 'X-Auth-Token': 'real-token' }, body: { pluginId: 'stocks', value: 'y' } });
+  assert.equal(res.status, 400);
+});
+
+test('an /add body with no pluginId or value is rejected with 400 once auth has passed', async () => {
+  await setBadgeToken('real-token');
+  const server = createActionServer(fakeAddRuntime(async () => {}));
+  const res1 = await post(server, { path: '/add', headers: { 'X-Auth-Token': 'real-token' }, body: { value: 'y' } });
+  assert.equal(res1.status, 400);
+  const res2 = await post(server, { path: '/add', headers: { 'X-Auth-Token': 'real-token' }, body: { pluginId: 'stocks' } });
+  assert.equal(res2.status, 400);
+});

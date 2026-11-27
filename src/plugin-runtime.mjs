@@ -40,6 +40,17 @@
 // (cfg.cardOverrides[id].hidden), and display position
 // (cfg.cardOverrides[id].order, slice 3's drag/reorder) — applied in
 // _poll() below, after poll() returns and before the push.
+//
+// A plugin may also optionally export `addCardValue(settings, value)` —
+// the layout editor's (Nexus 281ee5a2 slice 4) "+ Add" empty-slot flow,
+// relayed from the badge through action-server.mjs's POST /add. Takes
+// the plugin's own current settings and the buyer's raw input (symbol,
+// city, etc.) and returns a NEW settings object with one more instance,
+// or throws a buyer-facing message (e.g. a max-count or unrecognized-
+// value rejection). There is no generic fallback the way there is for
+// edit/delete/move — a brand-new card has no id yet for a generic
+// override to key off, so a plugin with no addCardValue just doesn't
+// support the add flow.
 
 import { getSecret } from './credential-store.mjs';
 import { pushCards } from './badge-client.mjs';
@@ -247,6 +258,41 @@ export class PluginRuntime {
     const feedCfg = getFeedConfig(pluginId, { intervalSeconds: plugin.defaultIntervalSeconds });
     this._poll(plugin, feedCfg, loadConfig()).catch((e) => {
       log.error(`[${pluginId}] post-edit refresh poll failed: ${e.message}`);
+    });
+  }
+
+  /**
+   * Called by action-server.mjs's POST /add — the badge-served layout
+   * editor's (Nexus 281ee5a2 slice 4) "+ Add" empty-slot flow, relayed
+   * from the badge's /tile-add handler the same way a tap or edit reaches
+   * handleAction()/handleEdit(). `value` is the buyer's raw input (a
+   * symbol, a city name, etc.) — entirely plugin-specific, so this only
+   * routes to `addCardValue(settings, value)` and persists what comes
+   * back. Unlike editCardValue/removeCardValue there is no generic
+   * fallback: adding a brand-new card has no id yet for a generic
+   * override to key off, so a plugin that doesn't define addCardValue
+   * simply doesn't support the add flow. addCardValue throws a message
+   * meant for the buyer (e.g. "already have 3 symbols, remove one first")
+   * on a rejected add; that propagates to the caller same as any other
+   * failure here.
+   */
+  async handleAdd(pluginId, value) {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) throw new Error(`No such plugin: "${pluginId}".`);
+    if (typeof plugin.addCardValue !== 'function') {
+      throw new Error(`Plugin "${pluginId}" doesn't support adding cards yet.`);
+    }
+    const feedCfg = getFeedConfig(pluginId, { intervalSeconds: plugin.defaultIntervalSeconds });
+    const nextSettings = plugin.addCardValue(feedCfg.settings || {}, value);
+    updateConfig((cfg) => { cfg.feeds[pluginId].settings = nextSettings; });
+
+    log.info(`[${pluginId}] add "${value}" handled.`);
+
+    // Same fire-and-forget immediate refresh as handleEdit()/handleMove()
+    // — the new tile should show up on the layout page's own 2s /cards
+    // poll without waiting for this plugin's normal schedule.
+    this._poll(plugin, feedCfg, loadConfig()).catch((e) => {
+      log.error(`[${pluginId}] post-add refresh poll failed: ${e.message}`);
     });
   }
 

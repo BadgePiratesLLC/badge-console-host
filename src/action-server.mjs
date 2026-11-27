@@ -32,6 +32,17 @@
 // instead {"moves": [{"id", "order"}, ...]} carries every card whose
 // display position changed in one call (docs/CardSchema.md "Drag/
 // reorder" in QACode_27). Routed to PluginRuntime.handleMove().
+//
+// POST /add is slice 4's "+ Add" empty-slot half of the same channel,
+// relayed by the firmware's /tile-add handler -> ActionClient::sendAdd().
+// Body is {"pluginId": "<feed id>", "value": "<buyer input>"} — no
+// top-level `id` either, since the card doesn't exist yet. Routed to
+// PluginRuntime.handleAdd(). Unlike /action, /edit and /move's 404-or-502
+// split, a rejected add is a 400: an unknown plugin or one with no
+// addCardValue is 404 (same "not a thing that exists" bucket as
+// elsewhere), but everything addCardValue itself throws (max reached, bad
+// value) is a buyer input problem the badge should show as a toast, not
+// treat as a push/server failure.
 
 import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
@@ -76,6 +87,7 @@ export function createActionServer(runtime) {
     const kind = req.method === 'POST' && url.pathname === '/action' ? 'action'
       : req.method === 'POST' && url.pathname === '/edit' ? 'edit'
       : req.method === 'POST' && url.pathname === '/move' ? 'move'
+      : req.method === 'POST' && url.pathname === '/add' ? 'add'
       : null;
     if (!kind) {
       log.info(`action listener: ignored ${req.method} ${url.pathname} from ${remote}`);
@@ -96,15 +108,20 @@ export function createActionServer(runtime) {
       log.info(`${kind} request from ${remote} rejected: bad json body`);
       return sendJson(res, 400, { error: 'bad json' });
     }
-    // /move has no top-level id — it carries a "moves" array instead (see
-    // the module header comment above).
-    if (kind !== 'move' && (!body.id || typeof body.id !== 'string')) {
+    // /move and /add have no top-level id — /move carries a "moves" array
+    // and /add carries {pluginId, value} instead (see the module header
+    // comment above).
+    if (kind !== 'move' && kind !== 'add' && (!body.id || typeof body.id !== 'string')) {
       log.info(`${kind} request from ${remote} rejected: missing id`);
       return sendJson(res, 400, { error: 'missing id' });
     }
     if (kind === 'move' && !Array.isArray(body.moves)) {
       log.info(`move request from ${remote} rejected: missing moves array`);
       return sendJson(res, 400, { error: 'missing moves array' });
+    }
+    if (kind === 'add' && (typeof body.pluginId !== 'string' || !body.pluginId || typeof body.value !== 'string' || !body.value)) {
+      log.info(`add request from ${remote} rejected: missing pluginId or value`);
+      return sendJson(res, 400, { error: 'missing pluginId or value' });
     }
 
     if (kind === 'move') {
@@ -117,6 +134,19 @@ export function createActionServer(runtime) {
         log.error(`move from ${remote}: failed: ${e.message}`);
         const notFound = /no known card owner|needs a non-empty id|needs a numeric order/i.test(e.message);
         return sendJson(res, notFound ? 404 : 502, { ok: false, error: e.message });
+      }
+    }
+
+    if (kind === 'add') {
+      log.info(`add request from ${remote}: pluginId "${body.pluginId}" value "${body.value}"`);
+      try {
+        await runtime.handleAdd(body.pluginId, body.value);
+        log.info(`add "${body.pluginId}" from ${remote}: ok`);
+        return sendJson(res, 200, { ok: true });
+      } catch (e) {
+        log.error(`add "${body.pluginId}" from ${remote}: failed: ${e.message}`);
+        const notFound = /no such plugin|doesn't support adding/i.test(e.message);
+        return sendJson(res, notFound ? 404 : 400, { ok: false, error: e.message });
       }
     }
 
