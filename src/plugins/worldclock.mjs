@@ -104,6 +104,23 @@ export function removeCardValue(settings, cardId) {
   return { ...settings, cities: keys.filter((_, j) => j !== idx).join(',') };
 }
 
+// Nexus 05eaf268: tap-to-edit-in-place was only ever delete+re-add for this
+// plugin (addCardValue/removeCardValue existed, editCardValue didn't) —
+// same findCity() resolution as addCardValue so typing "nyc" or "New York"
+// into the badge's edit field works the same way "+Add" already does.
+export function editCardValue(settings, cardId, newValue) {
+  const { keys, idx } = findKeyIndex(settings, cardId);
+  if (idx < 0) return null;
+  const city = findCity(newValue);
+  if (!city) throw new Error(`Don't recognize "${newValue}" — try a bigger nearby city.`);
+  if (keys.includes(city.key) && keys[idx] !== city.key) {
+    throw new Error(`${city.label} is already added.`);
+  }
+  const next = [...keys];
+  next[idx] = city.key;
+  return { ...settings, cities: next.join(',') };
+}
+
 // Local system timezone of the host machine — the reference "today" that
 // each city's day offset is reported relative to (whatever machine runs
 // badge-console-host, which is the same machine Kevin's own clock is on).
@@ -147,6 +164,10 @@ function buildCard(city, now, order) {
     order,
     updatedAt: Date.now(),
     ttlSeconds: 120,
+    // See stocks.mjs's matching comment — editCardValue() above needs
+    // these two set for the badge to show a text field at all.
+    editLabel: 'City',
+    editValue: city.label,
   };
 }
 

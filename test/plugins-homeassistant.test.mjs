@@ -9,7 +9,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { poll, onAction } from '../src/plugins/homeassistant.mjs';
+import { poll, onAction, editCardValue } from '../src/plugins/homeassistant.mjs';
 
 function withMockFetch(handler, fn) {
   const original = globalThis.fetch;
@@ -67,6 +67,11 @@ test('poll() reads a state entity into one card', async () => {
       assert.equal(result.cards[0].value, '71.5');
       assert.equal(result.cards[0].unit, '°F');
       assert.equal(result.cards[0].title, 'Office Temp');
+      // Nexus 05eaf268: the badge only shows a tap-to-edit text field when
+      // both of these are set — editCardValue() existing isn't enough on
+      // its own for the entity id to actually be rebindable from the badge.
+      assert.equal(result.cards[0].editLabel, 'Entity id');
+      assert.equal(result.cards[0].editValue, 'sensor.office_temp');
     },
   );
 });
@@ -115,6 +120,8 @@ test('poll() emits a type: "button" card showing ON, bright, when the entity is 
       assert.equal(result.cards[0].value, 'ON');
       assert.equal(result.cards[0].state, 'ok');
       assert.equal(result.cards[0].color, '#F0A020');
+      assert.equal(result.cards[0].editLabel, 'Entity id');
+      assert.equal(result.cards[0].editValue, 'light.office_accent');
     },
   );
 });
@@ -204,4 +211,30 @@ test('onAction() rejects a malformed actionService before ever calling fetch', a
     },
   );
   assert.equal(called, false);
+});
+
+// Nexus 05eaf268: this plugin had no editCardValue() at all — an entity
+// id could only be rebound from the Feeds page, not the badge's own
+// layout editor, since plugin-runtime.mjs's handleEdit() had nothing to
+// call for either HA card. Pure function, no network needed.
+test('editCardValue rebinds the state card\'s entity id', () => {
+  const settings = { ...baseSettings, stateEntityId: 'sensor.office_temp' };
+  const next = editCardValue(settings, 'ha-state-sensor_office_temp', 'sensor.bedroom_temp');
+  assert.equal(next.stateEntityId, 'sensor.bedroom_temp');
+});
+
+test('editCardValue rebinds the action card\'s entity id', () => {
+  const settings = { ...baseSettings, actionEntityId: 'light.office_accent' };
+  const next = editCardValue(settings, 'ha-action-light_office_accent', 'light.bedroom_lamp');
+  assert.equal(next.actionEntityId, 'light.bedroom_lamp');
+});
+
+test('editCardValue returns null for a card id neither current slot matches', () => {
+  const settings = { ...baseSettings, stateEntityId: 'sensor.office_temp' };
+  assert.equal(editCardValue(settings, 'ha-state-sensor_bedroom_temp', 'sensor.x'), null);
+});
+
+test('editCardValue returns null for a blank new value', () => {
+  const settings = { ...baseSettings, stateEntityId: 'sensor.office_temp' };
+  assert.equal(editCardValue(settings, 'ha-state-sensor_office_temp', '  '), null);
 });

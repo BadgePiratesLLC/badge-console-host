@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { setScratchHome } from './_helpers.mjs';
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bch-runtime-test-'));
@@ -10,6 +11,7 @@ setScratchHome(scratch);
 
 const { PluginRuntime } = await import('../src/plugin-runtime.mjs');
 const { updateConfig, resetConfigCacheForTests } = await import('../src/config-store.mjs');
+const { setBadgeToken } = await import('../src/badge-client.mjs');
 
 function fakePlugin({ id, cards, shouldThrow }) {
   return {
@@ -218,6 +220,118 @@ test('handleEdit() throws on a card id no plugin has ever pushed', async () => {
   resetConfigCacheForTests();
   const runtime = new PluginRuntime([fakePlugin({ id: 'unrelated-2', cards: [] })]);
   await assert.rejects(() => runtime.handleEdit('never-pushed', { color: '#000000' }), /No known card owner/);
+});
+
+// Nexus 05eaf268: a value edit whose id scheme bakes the value into the
+// card id (stocks-<symbol>, worldclock-<city>, sports-<team>, ha-state-
+// <entity>) produces a brand-new id — the badge's /cards contract is
+// upsert-only, so without an explicit removal the OLD id just sits there
+// forever as a ghost tile next to the new one.
+function fakeBadgeServer() {
+  const received = [];
+  const server = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/cards') {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        received.push(JSON.parse(body || '[]'));
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('ok');
+      });
+      return;
+    }
+    res.writeHead(404); res.end();
+  });
+  return { server, received };
+}
+
+test('handleEdit() explicitly removes the stale old-id card from the badge when a value edit changes the id', async (t) => {
+  resetConfigCacheForTests();
+  await setBadgeToken('test-token');
+  const badge = fakeBadgeServer();
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => badge.server.close(resolve));
+    // Leaving badge.host pointed at this now-closed server would break
+    // every later test's runOnce() in this file (loadConfig() re-reads
+    // the same on-disk scratch config resetConfigCacheForTests() doesn't
+    // clear).
+    updateConfig((cfg) => { cfg.badge.host = ''; cfg.badge.port = 80; });
+  });
+  updateConfig((cfg) => {
+    cfg.badge.host = '127.0.0.1';
+    cfg.badge.port = badge.server.address().port;
+  });
+
+  const idKeyed = {
+    id: 'id-keyed-feed',
+    label: 'id-keyed-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    credentialsSchema: [],
+    settingsSchema: [],
+    async poll(ctx) {
+      const symbol = ctx.settings.symbol || 'AAPL';
+      return { cards: [{ id: `idk-${symbol.toLowerCase()}`, title: symbol, editLabel: 'Symbol', editValue: symbol }] };
+    },
+    editCardValue(settings, cardId, newValue) {
+      const symbol = settings.symbol || 'AAPL';
+      if (cardId !== `idk-${symbol.toLowerCase()}`) return null;
+      return { ...settings, symbol: newValue };
+    },
+  };
+  const runtime = new PluginRuntime([idKeyed]);
+  await runtime.runOnce('id-keyed-feed'); // pushes idk-aapl, populates cardOwner
+  badge.received.length = 0;
+
+  await runtime.handleEdit('idk-aapl', { value: 'MSFT' });
+
+  // Two pushes land on the badge: the refresh poll's new card (idk-msft),
+  // then the explicit cleanup removing the stale idk-aapl.
+  const allIds = badge.received.flatMap((push) => push.map((c) => c.id));
+  assert.ok(allIds.includes('idk-msft'), `expected idk-msft among pushed ids: ${JSON.stringify(allIds)}`);
+  const removal = badge.received.flat().find((c) => c.id === 'idk-aapl');
+  assert.ok(removal, `expected a push for stale id idk-aapl: ${JSON.stringify(badge.received)}`);
+  assert.equal(removal.remove, true);
+});
+
+test('handleEdit() does not emit a stale-id removal when the edited card keeps the same id', async (t) => {
+  resetConfigCacheForTests();
+  await setBadgeToken('test-token-2');
+  const badge = fakeBadgeServer();
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => badge.server.close(resolve));
+    updateConfig((cfg) => { cfg.badge.host = ''; cfg.badge.port = 80; });
+  });
+  updateConfig((cfg) => {
+    cfg.badge.host = '127.0.0.1';
+    cfg.badge.port = badge.server.address().port;
+  });
+
+  const stableId = {
+    id: 'stable-id-feed',
+    label: 'stable-id-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    credentialsSchema: [],
+    settingsSchema: [],
+    async poll(ctx) {
+      return { cards: [{ id: 'stable-1', title: ctx.settings.label || 'X', editLabel: 'Label', editValue: ctx.settings.label || 'X' }] };
+    },
+    editCardValue(settings, cardId, newValue) {
+      if (cardId !== 'stable-1') return null;
+      return { ...settings, label: newValue };
+    },
+  };
+  const runtime = new PluginRuntime([stableId]);
+  await runtime.runOnce('stable-id-feed');
+  badge.received.length = 0;
+
+  await runtime.handleEdit('stable-1', { value: 'renamed' });
+
+  const removals = badge.received.flat().filter((c) => c.remove);
+  assert.deepEqual(removals, []);
 });
 
 // Nexus 281ee5a2 slice 3: handleMove() is the drag/reorder half of the

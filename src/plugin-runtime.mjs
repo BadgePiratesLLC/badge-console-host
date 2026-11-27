@@ -252,13 +252,59 @@ export class PluginRuntime {
 
     log.info(`[${pluginId}] edit "${cardId}" handled (${JSON.stringify(edit)}).`);
 
-    // Same fire-and-forget immediate refresh as handleAction() — the
-    // layout page's own 2s /cards poll should show the edit without
-    // waiting for this plugin's normal schedule.
+    // Nexus 05eaf268: a value edit's new id (e.g. stocks-aapl ->
+    // stocks-msft) is a brand NEW card as far as the badge's /cards
+    // upsert-only contract is concerned — nothing ever told the badge to
+    // drop the old id, so every editCardValue() caller was leaving a
+    // stale ghost tile behind (invisible until this ticket's editLabel/
+    // editValue fix actually made editCardValue() reachable from the UI).
+    // Snapshot this plugin's owned ids before the refresh poll below and
+    // diff against what it pushes after, rather than special-casing each
+    // plugin's own id scheme here.
+    const ownedBeforeEdit = edit.value !== undefined
+      ? [...this.cardOwner.entries()].filter(([, owner]) => owner === pluginId).map(([id]) => id)
+      : null;
+
+    // Same immediate refresh as handleAction(), but awaited here (not
+    // fire-and-forget) so the stale-id cleanup below has the post-edit
+    // card list to diff against.
     const feedCfg = getFeedConfig(pluginId, { intervalSeconds: plugin.defaultIntervalSeconds });
-    this._poll(plugin, feedCfg, loadConfig()).catch((e) => {
+    let pollResult;
+    try {
+      pollResult = await this._poll(plugin, feedCfg, loadConfig());
+    } catch (e) {
       log.error(`[${pluginId}] post-edit refresh poll failed: ${e.message}`);
+      return;
+    }
+    if (!ownedBeforeEdit || !pollResult.ok) return;
+
+    const ownedAfterEdit = new Set(pollResult.cards.map((c) => c.id));
+    const staleIds = ownedBeforeEdit.filter((id) => !ownedAfterEdit.has(id));
+    if (staleIds.length === 0) return;
+
+    updateConfig((cfg) => {
+      for (const staleId of staleIds) {
+        this.cardOwner.delete(staleId);
+        // No generic way to know which new id a stale one's ACCENT/order
+        // override should migrate to — dropping it is the safe default
+        // (a left-behind override on an id nothing will ever push again
+        // is a worse bug than needing to re-pick a color once).
+        if (cfg.cardOverrides) delete cfg.cardOverrides[staleId];
+      }
     });
+    const cfgNow = loadConfig();
+    if (!cfgNow.badge.host) return;
+    try {
+      await pushCards(
+        cfgNow.badge.host,
+        cfgNow.badge.port,
+        staleIds.map((id) => ({ id, remove: true })),
+        { actionPort: this.actionPort },
+      );
+      log.info(`[${pluginId}] removed stale card id(s) after edit: ${staleIds.join(', ')}`);
+    } catch (e) {
+      log.error(`[${pluginId}] failed to remove stale card id(s) ${staleIds.join(', ')} after edit: ${e.message}`);
+    }
   }
 
   /**
