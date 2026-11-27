@@ -71,6 +71,32 @@ test('poll() reads a state entity into one card', async () => {
   );
 });
 
+test('poll() rounds a raw-float sensor state to one decimal (Nexus 64644fa0)', async () => {
+  await withMockFetch(
+    async () => jsonResponse(200, { state: '68.2970016479492', attributes: { unit_of_measurement: '°F' } }),
+    async () => {
+      const result = await poll({
+        settings: { ...baseSettings, stateEntityId: 'sensor.office_temp' },
+        getSecret: async () => 'tok',
+      });
+      assert.equal(result.cards[0].value, '68.3');
+    },
+  );
+});
+
+test('poll() leaves a non-numeric sensor state untouched', async () => {
+  await withMockFetch(
+    async () => jsonResponse(200, { state: 'unavailable', attributes: {} }),
+    async () => {
+      const result = await poll({
+        settings: { ...baseSettings, stateEntityId: 'sensor.office_temp' },
+        getSecret: async () => 'tok',
+      });
+      assert.equal(result.cards[0].value, 'unavailable');
+    },
+  );
+});
+
 test('poll() emits a type: "button" card showing ON, bright, when the entity is on', async () => {
   await withMockFetch(
     async (url) => {

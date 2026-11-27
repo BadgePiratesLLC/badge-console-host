@@ -74,7 +74,12 @@ export async function poll(ctx) {
     cards.push({
       id: stateCardId(ctx.settings.stateEntityId),
       title: ctx.settings.stateLabel || entity.attributes?.friendly_name || ctx.settings.stateEntityId,
-      value: entity.state,
+      // HA reports numeric sensor state as a raw float (e.g. 68.2970016479492)
+      // that overflows the tile - round to one decimal for display. Non-numeric
+      // states (on/off, text) pass through unchanged. Nexus 64644fa0.
+      value: Number.isFinite(Number(entity.state)) && entity.state !== ''
+        ? String(Math.round(Number(entity.state) * 10) / 10)
+        : entity.state,
       unit: entity.attributes?.unit_of_measurement || '',
       subtitle: entity.attributes?.friendly_name || ctx.settings.stateEntityId,
       state: 'neutral',
