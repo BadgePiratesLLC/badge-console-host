@@ -130,6 +130,96 @@ test('handleAction() throws if the owning plugin has no onAction()', async () =>
   await assert.rejects(() => runtime.handleAction('info-1'), /has no onAction/);
 });
 
+// Nexus 281ee5a2 slice 2/3: handleEdit() is the second half of the
+// layout editor's reverse channel (see action-server.mjs's POST /edit) —
+// this was the gap that made every edit on the badge's own /layout page
+// 404 back to it, since the host had no /edit route at all until now.
+
+test('handleEdit() applies a color override generically, even for a plugin with no editCardValue', async () => {
+  resetConfigCacheForTests();
+  const plain = fakePlugin({ id: 'plain-feed', cards: [{ id: 'plain-1', title: 'X', color: '#111111' }] });
+  const runtime = new PluginRuntime([plain]);
+  await runtime.runOnce('plain-feed');
+  await runtime.handleEdit('plain-1', { color: '#abcdef' });
+  const result = await runtime.runOnce('plain-feed');
+  assert.equal(result.cards[0].color, '#abcdef');
+});
+
+test('handleEdit() hides a card generically (delete) when the plugin has no removeCardValue', async () => {
+  resetConfigCacheForTests();
+  const plain = fakePlugin({ id: 'plain-feed-2', cards: [{ id: 'plain-2', title: 'X' }] });
+  const runtime = new PluginRuntime([plain]);
+  await runtime.runOnce('plain-feed-2');
+  await runtime.handleEdit('plain-2', { delete: true });
+  const result = await runtime.runOnce('plain-feed-2');
+  assert.deepEqual(result.cards, []);
+});
+
+test('handleEdit() throws when a value edit is requested on a plugin with no editCardValue', async () => {
+  resetConfigCacheForTests();
+  const plain = fakePlugin({ id: 'plain-feed-3', cards: [{ id: 'plain-3', title: 'X' }] });
+  const runtime = new PluginRuntime([plain]);
+  await runtime.runOnce('plain-feed-3');
+  await assert.rejects(() => runtime.handleEdit('plain-3', { value: 'new' }), /doesn't support editing/);
+});
+
+test('handleEdit() routes a value edit through the owning plugin\'s editCardValue and persists it', async () => {
+  resetConfigCacheForTests();
+  const calls = [];
+  const editable = {
+    id: 'editable-feed',
+    label: 'editable-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    credentialsSchema: [],
+    settingsSchema: [],
+    async poll(ctx) { return { cards: [{ id: 'ed-1', title: ctx.settings.symbol || 'AAPL' }] }; },
+    editCardValue(settings, cardId, newValue) {
+      calls.push([cardId, newValue]);
+      if (cardId !== 'ed-1') return null;
+      return { ...settings, symbol: newValue };
+    },
+  };
+  const runtime = new PluginRuntime([editable]);
+  await runtime.runOnce('editable-feed');
+  await runtime.handleEdit('ed-1', { value: 'TSLA' });
+  assert.deepEqual(calls, [['ed-1', 'TSLA']]);
+  const result = await runtime.runOnce('editable-feed');
+  assert.equal(result.cards[0].title, 'TSLA');
+});
+
+test('handleEdit() routes delete through removeCardValue when the plugin defines it', async () => {
+  resetConfigCacheForTests();
+  const removable = {
+    id: 'removable-feed',
+    label: 'removable-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    credentialsSchema: [],
+    settingsSchema: [],
+    async poll(ctx) {
+      return { cards: (ctx.settings.symbols || 'A,B').split(',').map((s) => ({ id: `rm-${s.toLowerCase()}`, title: s })) };
+    },
+    removeCardValue(settings, cardId) {
+      const symbols = String(settings.symbols || 'A,B').split(',');
+      const idx = symbols.findIndex((s) => `rm-${s.toLowerCase()}` === cardId);
+      if (idx < 0) return null;
+      return { ...settings, symbols: symbols.filter((_, j) => j !== idx).join(',') };
+    },
+  };
+  const runtime = new PluginRuntime([removable]);
+  await runtime.runOnce('removable-feed');
+  await runtime.handleEdit('rm-b', { delete: true });
+  const result = await runtime.runOnce('removable-feed');
+  assert.deepEqual(result.cards.map((c) => c.id), ['rm-a']);
+});
+
+test('handleEdit() throws on a card id no plugin has ever pushed', async () => {
+  resetConfigCacheForTests();
+  const runtime = new PluginRuntime([fakePlugin({ id: 'unrelated-2', cards: [] })]);
+  await assert.rejects(() => runtime.handleEdit('never-pushed', { color: '#000000' }), /No known card owner/);
+});
+
 test('reschedule only arms timers for enabled feeds, respecting minIntervalSeconds', async () => {
   resetConfigCacheForTests();
   const feed = fakePlugin({ id: 'scheduled-feed', cards: [] });

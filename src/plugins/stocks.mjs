@@ -200,6 +200,39 @@ function buildCard(symbol, quote, { open, stale, order }) {
   };
 }
 
+// Nexus 281ee5a2 slice 2/3: the badge-served layout editor's tap-to-edit
+// and delete relay (plugin-runtime.mjs's handleEdit) calls these with
+// this plugin's OWN current settings and one of its own card ids
+// (`stocks-<symbol>`, lowercased — see buildCard()) and gets back a new
+// settings object to persist, or null if cardId isn't one of this
+// plugin's slots. Same index-into-the-comma-joined-string mechanics as
+// the Feeds page's renderSymbolListSetting (app.js) — one storage format,
+// edited from two surfaces.
+function findSymbolIndex(settings, cardId) {
+  const symbols = String(settings?.symbols ?? settings?.symbol ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const idx = symbols.findIndex((s) => `stocks-${s.toLowerCase()}` === cardId);
+  return { symbols, idx };
+}
+
+export function editCardValue(settings, cardId, newValue) {
+  const { symbols, idx } = findSymbolIndex(settings, cardId);
+  if (idx < 0) return null;
+  const cleaned = String(newValue || '').trim().toUpperCase();
+  if (!cleaned) return null;
+  symbols[idx] = cleaned;
+  return { ...settings, symbols: symbols.join(',') };
+}
+
+export function removeCardValue(settings, cardId) {
+  const { symbols, idx } = findSymbolIndex(settings, cardId);
+  if (idx < 0) return null;
+  const next = symbols.filter((_, j) => j !== idx);
+  return { ...settings, symbols: next.join(',') };
+}
+
 export async function poll(ctx) {
   const symbols = parseSymbols(ctx.settings);
   const apiKey = await ctx.getSecret('finnhub-api-key');
