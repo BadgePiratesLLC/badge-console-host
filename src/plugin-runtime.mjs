@@ -99,6 +99,19 @@ export class PluginRuntime {
   }
 
   async _poll(plugin, feedCfg, cfg) {
+    // Nexus cbadc3da: snapshotted BEFORE poll() runs, so a plugin whose
+    // current result drops an id it used to own (a settings change made
+    // through the Feeds page, a symbol/entity swap, a feed re-enabled with
+    // a different shape — anything short of the layout editor's own edit
+    // flow, which already special-cased this in 05eaf268) still gets that
+    // dropped id cleaned up below. Without this, a badge's shared card
+    // pool only ever grows: an id nothing pushes anymore just sits there
+    // forever as a duplicate/ghost tile next to the current one (the
+    // "BOOKSHELF/OFFICE TEMP show up twice" defect this ticket traces to
+    // here, not to the layout config itself).
+    const ownedBefore = [...this.cardOwner.entries()]
+      .filter(([, owner]) => owner === plugin.id)
+      .map(([id]) => id);
     const ctx = {
       settings: feedCfg.settings || {},
       getSecret: (account) => getSecret(SERVICE, account),
@@ -168,7 +181,46 @@ export class PluginRuntime {
     status.lastError = null;
     status.cardCount = cards.length;
     log.info(`[${plugin.id}] pushed ${cards.length} card(s).`);
+
+    await this._removeStaleIds(plugin.id, ownedBefore, result.cards, cfg);
     return { ok: true, cards };
+  }
+
+  /**
+   * Nexus cbadc3da: shared by every call site (scheduled tick, runOnce,
+   * and the post-action/edit/add/move refresh polls) — a plugin's current
+   * push is treated as its OWN complete set, so any id it owned before
+   * this poll but didn't just re-push is gone for good and gets an
+   * explicit `{ id, remove: true }` on the badge, not left behind as a
+   * duplicate/ghost tile. `ownedBefore` and `currentCards` are both this
+   * plugin's own ids only — never another plugin's, so one feed's
+   * reshape can't delete a different feed's card.
+   */
+  async _removeStaleIds(pluginId, ownedBefore, currentCards, cfg) {
+    if (ownedBefore.length === 0) return;
+    const currentIds = new Set(currentCards.filter((c) => c && c.id).map((c) => c.id));
+    const staleIds = ownedBefore.filter((id) => !currentIds.has(id));
+    if (staleIds.length === 0) return;
+
+    updateConfig((c) => {
+      for (const staleId of staleIds) {
+        this.cardOwner.delete(staleId);
+        if (c.cardOverrides) delete c.cardOverrides[staleId];
+      }
+    });
+
+    if (!cfg.badge.host) return;
+    try {
+      await pushCards(
+        cfg.badge.host,
+        cfg.badge.port,
+        staleIds.map((id) => ({ id, remove: true })),
+        { actionPort: this.actionPort },
+      );
+      log.info(`[${pluginId}] removed stale card id(s): ${staleIds.join(', ')}`);
+    } catch (e) {
+      log.error(`[${pluginId}] failed to remove stale card id(s) ${staleIds.join(', ')}: ${e.message}`);
+    }
   }
 
   /**
@@ -256,54 +308,16 @@ export class PluginRuntime {
     // stocks-msft) is a brand NEW card as far as the badge's /cards
     // upsert-only contract is concerned — nothing ever told the badge to
     // drop the old id, so every editCardValue() caller was leaving a
-    // stale ghost tile behind (invisible until this ticket's editLabel/
-    // editValue fix actually made editCardValue() reachable from the UI).
-    // Snapshot this plugin's owned ids before the refresh poll below and
-    // diff against what it pushes after, rather than special-casing each
-    // plugin's own id scheme here.
-    const ownedBeforeEdit = edit.value !== undefined
-      ? [...this.cardOwner.entries()].filter(([, owner]) => owner === pluginId).map(([id]) => id)
-      : null;
-
-    // Same immediate refresh as handleAction(), but awaited here (not
-    // fire-and-forget) so the stale-id cleanup below has the post-edit
-    // card list to diff against.
+    // stale ghost tile behind. Same immediate refresh as handleAction(),
+    // awaited here so the caller's own response reflects the edit; the
+    // stale-id cleanup itself is now generic (Nexus cbadc3da) and lives in
+    // _poll()/_removeStaleIds(), shared with the scheduled tick and every
+    // other refresh path instead of being re-derived here.
     const feedCfg = getFeedConfig(pluginId, { intervalSeconds: plugin.defaultIntervalSeconds });
-    let pollResult;
     try {
-      pollResult = await this._poll(plugin, feedCfg, loadConfig());
+      await this._poll(plugin, feedCfg, loadConfig());
     } catch (e) {
       log.error(`[${pluginId}] post-edit refresh poll failed: ${e.message}`);
-      return;
-    }
-    if (!ownedBeforeEdit || !pollResult.ok) return;
-
-    const ownedAfterEdit = new Set(pollResult.cards.map((c) => c.id));
-    const staleIds = ownedBeforeEdit.filter((id) => !ownedAfterEdit.has(id));
-    if (staleIds.length === 0) return;
-
-    updateConfig((cfg) => {
-      for (const staleId of staleIds) {
-        this.cardOwner.delete(staleId);
-        // No generic way to know which new id a stale one's ACCENT/order
-        // override should migrate to — dropping it is the safe default
-        // (a left-behind override on an id nothing will ever push again
-        // is a worse bug than needing to re-pick a color once).
-        if (cfg.cardOverrides) delete cfg.cardOverrides[staleId];
-      }
-    });
-    const cfgNow = loadConfig();
-    if (!cfgNow.badge.host) return;
-    try {
-      await pushCards(
-        cfgNow.badge.host,
-        cfgNow.badge.port,
-        staleIds.map((id) => ({ id, remove: true })),
-        { actionPort: this.actionPort },
-      );
-      log.info(`[${pluginId}] removed stale card id(s) after edit: ${staleIds.join(', ')}`);
-    } catch (e) {
-      log.error(`[${pluginId}] failed to remove stale card id(s) ${staleIds.join(', ')} after edit: ${e.message}`);
     }
   }
 

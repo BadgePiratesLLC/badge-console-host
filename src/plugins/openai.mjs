@@ -82,9 +82,15 @@ export async function poll(ctx) {
       },
       {
         id: 'openai-tokens',
-        title: 'OpenAI tokens',
+        // Nexus cbadc3da: 'OpenAI tokens' (-> "OPENAI TOKENS" once the
+        // badge uppercases it) doesn't fit a 3-col grid tile's title at
+        // either font size CardApp.cpp's fitTitleText() tries, so it was
+        // ellipsizing to "OPENAI TOKE...". Same icon+color as the spend
+        // card right next to it already says "OpenAI"; the unit suffix
+        // carries "tokens" instead of the title needing to spell it out.
+        title: 'OpenAI',
         value: totalTokens,
-        unit: '',
+        unit: ' tok',
         subtitle: 'today',
         state: 'neutral',
         icon: 'openai',

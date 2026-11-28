@@ -91,9 +91,13 @@ export async function poll(ctx) {
       },
       {
         id: 'anthropic-tokens',
-        title: 'Anthropic tokens',
+        // Nexus cbadc3da: same fix as openai.mjs's matching comment —
+        // 'Anthropic tokens' doesn't fit the grid tile's title either and
+        // would ellipsize the same way "OPENAI TOKENS" did. Icon+color
+        // already say "Anthropic"; the unit suffix carries "tokens".
+        title: 'Anthropic',
         value: totalTokens,
-        unit: '',
+        unit: ' tok',
         subtitle: 'today',
         state: 'neutral',
         icon: 'anthropic',
