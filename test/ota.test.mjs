@@ -23,12 +23,16 @@ setScratchHome(scratch);
 // so without this we'd race it for the same port. ACTION_PORT must be set
 // before server.mjs is imported, since it's read once at module load.
 process.env.BADGE_CONSOLE_ACTION_PORT = '41739';
+// Keep the post-update version-confirmation loop fast in tests.
+process.env.BADGE_OTA_VERIFY_TIMEOUT_MS = '1500';
+process.env.BADGE_OTA_VERIFY_POLL_MS = '100';
 
 const { start, stop } = await import('../src/server.mjs');
 
-function fakeBadge({ deviceToken = 'test-token-123', simulateRestartOnUpdate = false } = {}) {
+function fakeBadge({ deviceToken = 'test-token-123', simulateRestartOnUpdate = false, restartLandsNewVersion = true, respondOkOnUpdate = false } = {}) {
   const requests = [];
   let availableVersion = null;
+  let currentVersion = '2.3.9';
   let checking = false;
 
   const server = http.createServer((req, res) => {
@@ -52,7 +56,7 @@ function fakeBadge({ deviceToken = 'test-token-123', simulateRestartOnUpdate = f
 
     if (req.method === 'GET' && req.url === '/ota-status') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ currentVersion: '2.3.9', availableVersion, checking }));
+      res.end(JSON.stringify({ currentVersion, availableVersion, checking }));
       return;
     }
 
@@ -72,8 +76,17 @@ function fakeBadge({ deviceToken = 'test-token-123', simulateRestartOnUpdate = f
       if (simulateRestartOnUpdate) {
         // Mirrors OTA::installUpdate()'s success path: the badge restarts
         // mid-response and the connection just drops, no HTTP response
-        // ever gets sent.
+        // ever gets sent. restartLandsNewVersion=false models a badge that
+        // dropped the connection but came back on the old image (sig
+        // reject, brownout), which must NOT be reported as success.
+        if (restartLandsNewVersion) { currentVersion = availableVersion; availableVersion = null; }
         req.socket.destroy();
+        return;
+      }
+      if (respondOkOnUpdate) {
+        currentVersion = availableVersion; availableVersion = null;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
         return;
       }
       res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -152,7 +165,7 @@ test('ota-update with nothing available comes back as a clean error, not a crash
   assert.match(body.error, /no update available/);
 });
 
-test('ota-update whose badge restarts mid-response reports ok:true, restarted:true — not a thrown error', async (t) => {
+test('ota-update whose badge restarts mid-response and comes back on the new version reports ok + verified', async (t) => {
   const { base } = await pairedHost(t, { simulateRestartOnUpdate: true }, 41745);
 
   await fetch(`${base}/api/badge/ota-check`, { method: 'POST' }); // make an update available first
@@ -162,4 +175,43 @@ test('ota-update whose badge restarts mid-response reports ok:true, restarted:tr
   const body = await res.json();
   assert.equal(body.ok, true);
   assert.equal(body.restarted, true);
+  assert.equal(body.verified, true);
+  assert.equal(body.previousVersion, '2.3.9');
+  assert.equal(body.currentVersion, '2.4.0');
+});
+
+test('ota-update whose badge drops the connection but comes back on the OLD version is a 502, not success (Nexus 4e6cc6f3)', async (t) => {
+  const { base } = await pairedHost(t, { simulateRestartOnUpdate: true, restartLandsNewVersion: false }, 41746);
+  await fetch(`${base}/api/badge/ota-check`, { method: 'POST' });
+  const res = await fetch(`${base}/api/badge/ota-update`, { method: 'POST' });
+  assert.equal(res.status, 502);
+  const body = await res.json();
+  assert.equal(body.ok, false);
+  assert.match(body.error, /did not land: badge is running 2\.3\.9/);
+});
+
+test('ota-update whose badge never comes back is a 502 "could not confirm", not success', async (t) => {
+  const { badge, base } = await pairedHost(t, { simulateRestartOnUpdate: true }, 41747);
+  await fetch(`${base}/api/badge/ota-check`, { method: 'POST' });
+  // Take the badge off the network the moment /ota-update arrives.
+  badge.server.prependListener('request', (req) => {
+    if (req.url === '/ota-update') badge.server.close();
+  });
+  badge.server.on('connection', (sock) => { if (!badge.server.listening) sock.destroy(); });
+  const res = await fetch(`${base}/api/badge/ota-update`, { method: 'POST' });
+  assert.equal(res.status, 502);
+  const body = await res.json();
+  assert.equal(body.ok, false);
+  assert.match(body.error, /Could not confirm the update/);
+});
+
+test('ota-update that answers 2xx is still version-confirmed before success', async (t) => {
+  const { base } = await pairedHost(t, { respondOkOnUpdate: true }, 41748);
+  await fetch(`${base}/api/badge/ota-check`, { method: 'POST' });
+  const res = await fetch(`${base}/api/badge/ota-update`, { method: 'POST' });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.verified, true);
+  assert.equal(body.restarted, false);
+  assert.equal(body.currentVersion, '2.4.0');
 });
