@@ -106,22 +106,39 @@ export async function checkBadgeForUpdate(host, port, { timeoutMs = 5000 } = {})
 
 /**
  * POST /ota-update — tell the badge to install whatever version its last
- * check reported available (409 on the badge's side if nothing is — call
- * checkBadgeForUpdate()/getOtaStatus() first). Blocks on the badge's side
- * for the whole download/flash (same full-screen takeover the on-device
- * tap triggers), and a SUCCESSFUL install restarts the badge mid-response
- * — the connection just drops rather than the request ever completing
- * normally. That is indistinguishable from this side from a badge that
- * went unreachable for any other reason, so it's reported back as
- * { ok: true, restarted: true } rather than thrown; callers should
- * re-poll getOtaStatus() a few seconds later to confirm the new version
- * actually landed instead of trusting this alone. A real failure (the
- * badge reached its handler and the download/flash itself failed) comes
- * back as an actual error response and IS thrown.
+ * check reported available, then CONFIRM the badge actually came back on
+ * that version before reporting success (Nexus 4e6cc6f3 / ad98fbf6).
+ *
+ * The badge blocks on its side for the whole download/flash and a
+ * successful install restarts it mid-response, so the connection usually
+ * just drops (or our own timeoutMs abort fires first). A dropped
+ * connection is NOT evidence of success: it looks the same as a badge
+ * that rejected the signature and rebooted, browned out, or fell off
+ * Wi-Fi. Previously a drop/abort was returned as { ok: true, restarted:
+ * true }, so the host reported "success" for an install that never
+ * landed. Now:
+ *   1. read /ota-status first, which gives the version we expect to land
+ *      (availableVersion) and the one we are leaving (currentVersion);
+ *   2. POST /ota-update; if the badge answers with an error, throw it as before;
+ *   3. on drop/abort OR a 2xx, re-poll /ota-status until currentVersion
+ *      equals the expected version → { ok: true, verified: true, ... };
+ *      if the window expires and the badge is unreachable or still on
+ *      another version, throw. The route turns that into a 502.
  */
-export async function triggerBadgeUpdate(host, port, { timeoutMs = 45000 } = {}) {
+export async function triggerBadgeUpdate(host, port, {
+  timeoutMs = 45000,
+  verifyTimeoutMs = Number(process.env.BADGE_OTA_VERIFY_TIMEOUT_MS) || 180000,
+  pollIntervalMs = Number(process.env.BADGE_OTA_VERIFY_POLL_MS) || 5000,
+} = {}) {
   const token = await getBadgeToken();
   if (!token) throw new Error('Badge is not paired yet — no auth token stored.');
+
+  const before = await getOtaStatus(host, port);
+  const expected = before && before.availableVersion;
+  if (!expected) throw new Error('no update available - POST /ota-check first');
+  const previous = before.currentVersion ?? null;
+
+  let restarted = false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -136,22 +153,39 @@ export async function triggerBadgeUpdate(host, port, { timeoutMs = 45000 } = {})
       try { reason = JSON.parse(text).error || text; } catch { /* non-JSON body, use as-is */ }
       throw new Error(reason || `Badge rejected /ota-update (HTTP ${res.status})`);
     }
-    return { ok: true };
   } catch (e) {
     // A real failure the badge told us about explicitly (the `!res.ok`
-    // branch above) is always a plain Error with a message pulled from
-    // its JSON body — this instead catches fetch() itself failing to get
-    // a response at all (AbortError on timeout, or a TypeError "fetch
-    // failed" wrapping an undici SocketError/connection-refused/reset),
-    // which is exactly what a badge restarting mid-request looks like
-    // from here.
-    if (e.name === 'AbortError' || e instanceof TypeError) {
-      return { ok: true, restarted: true, note: 'Connection dropped — the badge is likely restarting into the new version.' };
-    }
-    throw e;
+    // branch above) is a plain Error, so rethrow it. AbortError (our
+    // timeout) or a TypeError "fetch failed" (socket reset/refused) is what
+    // a badge restarting mid-request looks like, but it is only a
+    // *candidate* success until the version check below confirms it.
+    if (!(e.name === 'AbortError' || e instanceof TypeError)) throw e;
+    restarted = true;
   } finally {
     clearTimeout(timer);
   }
+
+  const deadline = Date.now() + verifyTimeoutMs;
+  let lastSeen = null;
+  let lastErr = null;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+    try {
+      const st = await getOtaStatus(host, port);
+      lastSeen = st.currentVersion ?? null;
+      lastErr = null;
+      if (lastSeen === expected) {
+        return { ok: true, verified: true, restarted, previousVersion: previous, currentVersion: lastSeen };
+      }
+    } catch (e) {
+      lastErr = e; // still flashing/rebooting, so keep polling until the deadline
+    }
+  }
+  const secs = Math.round(verifyTimeoutMs / 1000);
+  if (lastSeen !== null && lastErr === null) {
+    throw new Error(`Update did not land: badge is running ${lastSeen} ${secs}s after /ota-update, expected ${expected}.`);
+  }
+  throw new Error(`Could not confirm the update: badge did not answer /ota-status on ${expected} within ${secs}s (last error: ${lastErr ? lastErr.message : 'none'}).`);
 }
 
 /**

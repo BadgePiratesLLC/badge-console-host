@@ -234,7 +234,7 @@ async function handleApi(req, res, pathname) {
     if (!cfg.badge.paired) return sendJson(res, 409, { error: 'badge is not paired yet' });
     try {
       const result = await triggerBadgeUpdate(cfg.badge.host, cfg.badge.port);
-      log.info(`Badge OTA update triggered for ${cfg.badge.host}:${cfg.badge.port}.${result.restarted ? ' (badge restarted mid-response)' : ''}`);
+      log.info(`Badge OTA update verified for ${cfg.badge.host}:${cfg.badge.port}: ${result.previousVersion} -> ${result.currentVersion}${result.restarted ? ' (badge restarted mid-response)' : ''}.`);
       return sendJson(res, 200, result);
     } catch (e) {
       log.error(`Badge OTA update failed for ${cfg.badge.host}:${cfg.badge.port}: ${e.message}`);

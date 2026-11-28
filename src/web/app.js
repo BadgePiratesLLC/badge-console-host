@@ -411,13 +411,11 @@ document.getElementById('ota-update-btn').addEventListener('click', async () => 
     return;
   }
   btn.disabled = true;
-  statusEl.textContent = 'Installing — the badge screen will show progress…';
+  statusEl.textContent = 'Installing — the badge screen will show progress. Waiting for it to come back on the new version (up to ~4 min)…';
   statusEl.className = 'status-line';
   try {
     const result = await api('/api/badge/ota-update', { method: 'POST' });
-    statusEl.textContent = result.restarted
-      ? 'Badge connection dropped — it is likely restarting into the new version.'
-      : 'Update finished.';
+    statusEl.textContent = `Update installed and confirmed: badge is now running ${result.currentVersion}.`;
     statusEl.className = 'status-line ok';
   } catch (e) {
     statusEl.textContent = `Update failed: ${e.message}`;
