@@ -31,9 +31,14 @@ const { start, stop } = await import('../src/server.mjs');
 // validCode/deviceToken mirror what a real badge's AuthToken does (Nexus
 // 2f45b023): a short-lived pairing code exchanged over POST /pair for the
 // real, long-lived device token that gates POST /cards.
-function fakeBadge({ validCode = '654321', deviceToken = 'test-token-123' } = {}) {
+function fakeBadge({ validCode = '654321', deviceToken = 'test-token-123', haEntities = null } = {}) {
   const received = [];
   const server = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/ha-status') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ entities: (haEntities || []).map((id) => ({ id })) }));
+      return;
+    }
     if (req.method === 'POST' && req.url === '/cards') {
       const token = req.headers['x-auth-token'];
       let body = '';
@@ -187,6 +192,71 @@ test('disabling a feed evicts its cards from the badge via the real /api/feeds/:
 
   const removals = badge.received.flatMap((r) => r.cards).filter((c) => c.remove);
   assert.ok(removals.some((c) => c.id === 'openclaw-activity'), `expected a remove push for openclaw-activity: ${JSON.stringify(badge.received)}`);
+});
+
+// Nexus 831d8e1a item 3: the host homeassistant plugin and the firmware's
+// own HA-direct /ha-config can end up watching the same entity with no
+// warning — that's the actual Bookshelf x3 / office-temp x2 root cause
+// cited in the ticket. GET /api/state's haOverlap field is what the
+// config page's warning banner reads, via findHaOverlap() in server.mjs.
+test('GET /api/state reports haOverlap when the host HA plugin and the firmware /ha-config watch the same entity', async (t) => {
+  const badge = fakeBadge({ haEntities: ['light.office_bookshelf', 'sensor.office_temp'] });
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  const badgePort = badge.server.address().port;
+
+  const hostPort = 41735;
+  await start(hostPort);
+  t.after(async () => {
+    await stop();
+    await new Promise((resolve) => badge.server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${hostPort}`;
+
+  await fetch(`${base}/api/badge/pair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host: '127.0.0.1', port: badgePort, code: '654321' }),
+  });
+
+  // Configure the homeassistant plugin's state entity to collide with one
+  // of the firmware's own /ha-config entities, and leave the action entity
+  // pointed at something the firmware doesn't watch.
+  await fetch(`${base}/api/feeds/homeassistant`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ settings: { stateEntityId: 'light.office_bookshelf', actionEntityId: 'switch.not_on_firmware' } }),
+  });
+
+  const state = await fetch(`${base}/api/state`).then((r) => r.json());
+  assert.deepEqual(state.haOverlap, ['light.office_bookshelf']);
+});
+
+test('GET /api/state reports no haOverlap when the host HA plugin entity is not also on the firmware', async (t) => {
+  const badge = fakeBadge({ haEntities: ['sensor.office_temp'] });
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  const badgePort = badge.server.address().port;
+
+  const hostPort = 41736;
+  await start(hostPort);
+  t.after(async () => {
+    await stop();
+    await new Promise((resolve) => badge.server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${hostPort}`;
+
+  await fetch(`${base}/api/badge/pair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host: '127.0.0.1', port: badgePort, code: '654321' }),
+  });
+  await fetch(`${base}/api/feeds/homeassistant`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ settings: { stateEntityId: 'light.not_watched_by_firmware' } }),
+  });
+
+  const state = await fetch(`${base}/api/state`).then((r) => r.json());
+  assert.deepEqual(state.haOverlap, []);
 });
 
 test('display order is a real, persisted per-feed setting — this is what the config page\'s up/down buttons drive', async (t) => {
