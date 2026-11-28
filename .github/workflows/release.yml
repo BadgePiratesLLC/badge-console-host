@@ -13,7 +13,30 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # Nexus 5a21fb55: v0.1.8 and v0.1.9 both shipped with package.json still at
+  # "0.1.7" (the tag bump was forgotten), so __APP_VERSION__ baked that stale
+  # string into the exe and the in-app updater nagged forever. A tag push
+  # with no matching version bump is a release-process bug, not a buildable
+  # state — fail loud here instead of publishing a mislabeled binary again.
+  verify-version:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: package.json version must match the pushed tag
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json version $pkg — bump package.json before tagging."
+            exit 1
+          fi
+          echo "OK: tag v$tag matches package.json"
+
   build:
+    needs: [verify-version]
+    if: always() && (needs.verify-version.result == 'success' || needs.verify-version.result == 'skipped')
     strategy:
       fail-fast: false
       matrix:
