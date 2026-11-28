@@ -57,6 +57,50 @@ export async function pushCards(host, port, cards, { timeoutMs = 5000, actionPor
 }
 
 /**
+ * GET the badge's own card snapshot (Nexus 831d8e1a). Unauthenticated on
+ * the badge's side (same reasoning as the layout page — see
+ * UsageServer.cpp's handleCardsGet) and used here only to reconcile this
+ * host's idea of what it owns against what the badge is actually holding,
+ * never to render anything a buyer sees.
+ */
+export async function getCards(host, port, { timeoutMs = 5000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(badgeUrl(host, port, '/cards'), { signal: controller.signal });
+    if (!res.ok) throw new Error(`Badge rejected GET /cards (HTTP ${res.status})`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * GET the badge's firmware-direct Home Assistant watch list (Nexus
+ * 831d8e1a) — the entities /ha-config told the badge to watch straight
+ * from HA over its own websocket, independent of anything this host's
+ * homeassistant plugin pushes. Token-gated like /cards POST. Used to warn
+ * when the same entity is double-watched by both paths (see server.mjs's
+ * /api/state haOverlap field).
+ */
+export async function getHaStatus(host, port, { timeoutMs = 4000 } = {}) {
+  const token = await getBadgeToken();
+  if (!token) throw new Error('Badge is not paired yet — no auth token stored.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(badgeUrl(host, port, '/ha-status'), {
+      headers: { 'X-Auth-Token': token },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Badge rejected /ha-status (HTTP ${res.status})`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * GET the badge's own OTA status (Nexus ad98fbf6): the version it's
  * currently running plus whatever its OtaWorker last found during its
  * periodic 6h check or an explicit checkBadgeForUpdate() below —

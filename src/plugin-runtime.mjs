@@ -53,7 +53,7 @@
 // support the add flow.
 
 import { getSecret } from './credential-store.mjs';
-import { pushCards } from './badge-client.mjs';
+import { pushCards, getCards } from './badge-client.mjs';
 import { loadConfig, getFeedConfig, updateConfig } from './config-store.mjs';
 import { log } from './logger.mjs';
 
@@ -68,6 +68,19 @@ export class PluginRuntime {
     this.actionPort = actionPort; // told to the badge on every push, see action-server.mjs
     for (const p of plugins) {
       this.status.set(p.id, { lastSuccess: null, lastError: null, nextPollAt: null, cardCount: 0 });
+    }
+    // Nexus 831d8e1a: cardOwner used to be in-memory only, so a host
+    // restart forgot every id a plugin had pushed before it — the next
+    // poll's `ownedBefore` snapshot in _poll() came back empty for every
+    // plugin, and an id that plugin had since stopped pushing just sat on
+    // the badge forever (that's how ha-action-light_officeb, a truncated
+    // id from an older build, survived two installs). Reload whatever the
+    // last process persisted (config-store's cardOwner, written alongside
+    // cardOverrides) so ownership is accurate from this process's very
+    // first poll, not just after one full cycle rebuilds it.
+    const cfg = loadConfig();
+    for (const [cardId, pluginId] of Object.entries(cfg.cardOwner || {})) {
+      this.cardOwner.set(cardId, pluginId);
     }
   }
 
@@ -171,10 +184,17 @@ export class PluginRuntime {
     }
     // Ownership is tracked off the plugin's RAW output, not the filtered
     // `cards` — a hidden card still needs a known owner so a future
-    // "un-hide" has somewhere to route to.
-    for (const card of result.cards) {
-      if (card && card.id) this.cardOwner.set(card.id, plugin.id);
+    // "un-hide" has somewhere to route to. Persisted (Nexus 831d8e1a), not
+    // just kept in this.cardOwner, so a restart doesn't forget it — see
+    // the constructor's reload of the same cfg.cardOwner map.
+    const rawIds = result.cards.filter((c) => c && c.id).map((c) => c.id);
+    if (rawIds.length > 0) {
+      updateConfig((c) => {
+        c.cardOwner = c.cardOwner || {};
+        for (const id of rawIds) c.cardOwner[id] = plugin.id;
+      });
     }
+    for (const id of rawIds) this.cardOwner.set(id, plugin.id);
 
     const status = this.status.get(plugin.id);
     status.lastSuccess = Date.now();
@@ -205,6 +225,7 @@ export class PluginRuntime {
     updateConfig((c) => {
       for (const staleId of staleIds) {
         this.cardOwner.delete(staleId);
+        if (c.cardOwner) delete c.cardOwner[staleId];
         if (c.cardOverrides) delete c.cardOverrides[staleId];
       }
     });
@@ -220,6 +241,109 @@ export class PluginRuntime {
       log.info(`[${pluginId}] removed stale card id(s): ${staleIds.join(', ')}`);
     } catch (e) {
       log.error(`[${pluginId}] failed to remove stale card id(s) ${staleIds.join(', ')}: ${e.message}`);
+    }
+  }
+
+  /**
+   * Nexus 831d8e1a: a feed that gets disabled (or narrowed while already
+   * disabled) never polls again, so _removeStaleIds()'s usual cleanup —
+   * which only runs as a side effect of a poll — never fires. Without
+   * this, a disabled feed's last-pushed cards (stocks-aapl showing a
+   * frozen price while the feed is set to GOOG, say) just sit on the
+   * badge forever, frozen, eating a slot out of the shared 12-card pool.
+   * Called from server.mjs's feed-settings route on the enabled:true ->
+   * false transition, so disabling is also the one moment a feed's whole
+   * card set gets wiped, regardless of what its settings get narrowed to
+   * afterward while it stays off.
+   */
+  async evictFeed(pluginId) {
+    const owned = [...this.cardOwner.entries()]
+      .filter(([, owner]) => owner === pluginId)
+      .map(([id]) => id);
+    if (owned.length === 0) return;
+
+    updateConfig((c) => {
+      for (const id of owned) {
+        this.cardOwner.delete(id);
+        if (c.cardOwner) delete c.cardOwner[id];
+        if (c.cardOverrides) delete c.cardOverrides[id];
+      }
+    });
+
+    const cfg = loadConfig();
+    if (!cfg.badge.host) return;
+    try {
+      await pushCards(
+        cfg.badge.host,
+        cfg.badge.port,
+        owned.map((id) => ({ id, remove: true })),
+        { actionPort: this.actionPort },
+      );
+      log.info(`[${pluginId}] feed disabled — removed card id(s): ${owned.join(', ')}`);
+    } catch (e) {
+      log.error(`[${pluginId}] failed to remove card id(s) on feed disable: ${e.message}`);
+    }
+  }
+
+  /**
+   * Nexus 831d8e1a: run once at startup, before the scheduler's first
+   * tick. cardOwner now survives a restart (constructor, above), which
+   * covers a plugin that keeps running and simply stops pushing an id —
+   * its own next poll's ownedBefore/_removeStaleIds catches that. It does
+   * NOT cover an id whose owning feed is disabled (so it never polls to
+   * notice) or an id that predates cardOwner tracking entirely (an older
+   * plugin build's id, a hand-edited config) and so has no owner on
+   * record at all. Cross-check GET /cards — the badge's own ground
+   * truth — against which plugins are actually enabled right now, and
+   * evict anything that looks like a host plugin's own card (matches a
+   * registered plugin's `${id}-` prefix convention) but isn't backed by
+   * an enabled plugin's ownership record.
+   */
+  async reconcileOrphans() {
+    const cfg = loadConfig();
+    if (!cfg.badge.host) return;
+    let liveCards;
+    try {
+      liveCards = await getCards(cfg.badge.host, cfg.badge.port);
+    } catch (e) {
+      log.error(`startup reconcile: could not read GET /cards: ${e.message}`);
+      return;
+    }
+    if (!Array.isArray(liveCards)) return;
+
+    const orphans = [];
+    for (const card of liveCards) {
+      const id = card && card.id;
+      if (!id) continue;
+      const ownerId = this.cardOwner.get(id);
+      const ownerPlugin = ownerId ? this.plugins.get(ownerId) : null;
+      const ownerEnabled = ownerPlugin
+        ? getFeedConfig(ownerId, { intervalSeconds: ownerPlugin.defaultIntervalSeconds }).enabled
+        : false;
+      if (ownerPlugin && ownerEnabled) continue; // that plugin's own first poll will settle it
+
+      const matchesHostPrefix = [...this.plugins.values()].some((p) => id.startsWith(`${p.id}-`));
+      if (matchesHostPrefix) orphans.push(id);
+    }
+    if (orphans.length === 0) return;
+
+    updateConfig((c) => {
+      for (const id of orphans) {
+        this.cardOwner.delete(id);
+        if (c.cardOwner) delete c.cardOwner[id];
+        if (c.cardOverrides) delete c.cardOverrides[id];
+      }
+    });
+    try {
+      await pushCards(
+        cfg.badge.host,
+        cfg.badge.port,
+        orphans.map((id) => ({ id, remove: true })),
+        { actionPort: this.actionPort },
+      );
+      log.info(`startup reconcile: removed orphan card id(s): ${orphans.join(', ')}`);
+    } catch (e) {
+      log.error(`startup reconcile: failed to remove orphan id(s) ${orphans.join(', ')}: ${e.message}`);
     }
   }
 

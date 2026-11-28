@@ -481,6 +481,230 @@ test('handleAdd() lets addCardValue\'s rejection (e.g. max reached) propagate as
   await assert.rejects(() => runtime.handleAdd('capped-feed', 'x'), /already have 3/i);
 });
 
+// Nexus 831d8e1a: cardOwner now persists to config.json (next to
+// cardOverrides) so a fresh PluginRuntime — standing in for a host
+// restart — doesn't forget what a plugin pushed before it came up.
+
+test('cardOwner survives across PluginRuntime instances (simulated restart)', async () => {
+  resetConfigCacheForTests();
+  const feed = fakePlugin({ id: 'persisted-feed', cards: [{ id: 'persisted-1', title: 'X' }] });
+  const first = new PluginRuntime([feed]);
+  await first.runOnce('persisted-feed');
+  assert.equal(first.cardOwner.get('persisted-1'), 'persisted-feed');
+
+  // A brand-new instance, same on-disk config — this is what happens on
+  // process restart (loadConfig() itself is still cached in-process, but
+  // a real restart re-reads from disk the same way resetConfigCacheForTests
+  // forces here).
+  resetConfigCacheForTests();
+  const second = new PluginRuntime([feed]);
+  assert.equal(second.cardOwner.get('persisted-1'), 'persisted-feed');
+});
+
+test('a plugin that stops pushing an id across a restart still gets it cleaned up on its first poll after restart', async (t) => {
+  resetConfigCacheForTests();
+  await setBadgeToken('test-token-restart');
+  const badge = fakeBadgeServer();
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => badge.server.close(resolve));
+    updateConfig((cfg) => { cfg.badge.host = ''; cfg.badge.port = 80; });
+  });
+  updateConfig((cfg) => {
+    cfg.badge.host = '127.0.0.1';
+    cfg.badge.port = badge.server.address().port;
+  });
+
+  let shrink = false;
+  const shrinking = {
+    id: 'restart-shrink-feed',
+    label: 'restart-shrink-feed',
+    defaultIntervalSeconds: 60,
+    minIntervalSeconds: 1,
+    credentialsSchema: [],
+    settingsSchema: [],
+    async poll() {
+      return { cards: shrink ? [{ id: 'restart-keep', title: 'A' }] : [{ id: 'restart-keep', title: 'A' }, { id: 'restart-drop', title: 'B' }] };
+    },
+  };
+  const before = new PluginRuntime([shrinking]);
+  await before.runOnce('restart-shrink-feed'); // pushes both ids, persists ownership
+
+  // Simulate the restart: a brand-new runtime instance, in-memory
+  // cardOwner wiped, but on-disk cardOwner (just persisted above) intact.
+  shrink = true;
+  const after = new PluginRuntime([shrinking]);
+  badge.received.length = 0;
+  await after.runOnce('restart-shrink-feed');
+
+  const removal = badge.received.flat().find((c) => c.id === 'restart-drop');
+  assert.ok(removal, `expected restart-drop to be removed on the first post-restart poll: ${JSON.stringify(badge.received)}`);
+  assert.equal(removal.remove, true);
+});
+
+// Nexus 831d8e1a: evictFeed() is what the server's feed-disable route
+// calls — a disabled feed never polls again, so nothing else would ever
+// notice its last-pushed cards are now stale.
+
+test('evictFeed() removes every id the feed owns and clears it from cardOwner', async (t) => {
+  resetConfigCacheForTests();
+  await setBadgeToken('test-token-evict');
+  const badge = fakeBadgeServer();
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => badge.server.close(resolve));
+    updateConfig((cfg) => { cfg.badge.host = ''; cfg.badge.port = 80; });
+  });
+  updateConfig((cfg) => {
+    cfg.badge.host = '127.0.0.1';
+    cfg.badge.port = badge.server.address().port;
+  });
+
+  const feed = fakePlugin({ id: 'evict-feed', cards: [{ id: 'evict-1', title: 'A' }, { id: 'evict-2', title: 'B' }] });
+  const runtime = new PluginRuntime([feed]);
+  await runtime.runOnce('evict-feed');
+  badge.received.length = 0;
+
+  await runtime.evictFeed('evict-feed');
+
+  const removed = badge.received.flat().filter((c) => c.remove).map((c) => c.id).sort();
+  assert.deepEqual(removed, ['evict-1', 'evict-2']);
+  assert.equal(runtime.cardOwner.has('evict-1'), false);
+  assert.equal(runtime.cardOwner.has('evict-2'), false);
+  await assert.rejects(() => runtime.handleAction('evict-1'), /No known card owner/);
+});
+
+test('evictFeed() is a no-op when the feed owns no cards', async () => {
+  resetConfigCacheForTests();
+  const runtime = new PluginRuntime([fakePlugin({ id: 'nothing-owned-feed', cards: [] })]);
+  await assert.doesNotReject(() => runtime.evictFeed('nothing-owned-feed'));
+});
+
+// Nexus 831d8e1a: reconcileOrphans() is the startup pass — it has to
+// catch ids with no ownership record at all (an older plugin build's id,
+// pre-dating cardOwner tracking) as well as ids whose owning feed is
+// disabled, using GET /cards as ground truth and each plugin's own
+// `${id}-` prefix convention to decide what's "ours" to manage.
+
+function fakeBadgeServerWithCards(initialCards) {
+  let cards = initialCards;
+  const received = [];
+  const server = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/cards') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(cards));
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/cards') {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        const push = JSON.parse(body || '[]');
+        received.push(push);
+        for (const c of push) {
+          if (c.remove) cards = cards.filter((existing) => existing.id !== c.id);
+          else cards = [...cards.filter((existing) => existing.id !== c.id), c];
+        }
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('ok');
+      });
+      return;
+    }
+    res.writeHead(404); res.end();
+  });
+  return { server, received, getCards: () => cards };
+}
+
+test('reconcileOrphans() evicts a prefixed id with no ownership record at all (pre-dates cardOwner tracking)', async (t) => {
+  resetConfigCacheForTests();
+  await setBadgeToken('test-token-reconcile-1');
+  const badge = fakeBadgeServerWithCards([{ id: 'ha-action-light_officeb', title: 'stale' }]);
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => badge.server.close(resolve));
+    updateConfig((cfg) => { cfg.badge.host = ''; cfg.badge.port = 80; });
+  });
+  updateConfig((cfg) => {
+    cfg.badge.host = '127.0.0.1';
+    cfg.badge.port = badge.server.address().port;
+  });
+
+  const ha = fakePlugin({ id: 'ha-action', cards: [] });
+  const runtime = new PluginRuntime([ha]);
+  await runtime.reconcileOrphans();
+
+  assert.deepEqual(badge.getCards(), []);
+  const removal = badge.received.flat().find((c) => c.id === 'ha-action-light_officeb');
+  assert.ok(removal, `expected the orphan id to be removed: ${JSON.stringify(badge.received)}`);
+});
+
+test('reconcileOrphans() evicts an id whose owning feed is now disabled', async (t) => {
+  resetConfigCacheForTests();
+  await setBadgeToken('test-token-reconcile-2');
+  const badge = fakeBadgeServerWithCards([{ id: 'stocks-aapl', title: 'frozen' }]);
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => badge.server.close(resolve));
+    updateConfig((cfg) => { cfg.badge.host = ''; cfg.badge.port = 80; });
+  });
+  updateConfig((cfg) => {
+    cfg.badge.host = '127.0.0.1';
+    cfg.badge.port = badge.server.address().port;
+    cfg.cardOwner = { 'stocks-aapl': 'stocks' };
+    cfg.feeds.stocks = { enabled: false, order: 0, settings: {} };
+  });
+
+  const stocks = fakePlugin({ id: 'stocks', cards: [] });
+  const runtime = new PluginRuntime([stocks]);
+  await runtime.reconcileOrphans();
+
+  const removal = badge.received.flat().find((c) => c.id === 'stocks-aapl');
+  assert.ok(removal, `expected the disabled feed's frozen card to be removed: ${JSON.stringify(badge.received)}`);
+});
+
+test('reconcileOrphans() leaves an id alone when its owning feed is enabled, letting that plugin\'s own poll settle it', async (t) => {
+  resetConfigCacheForTests();
+  await setBadgeToken('test-token-reconcile-3');
+  const badge = fakeBadgeServerWithCards([{ id: 'stocks-aapl', title: 'still owned' }]);
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => badge.server.close(resolve));
+    updateConfig((cfg) => { cfg.badge.host = ''; cfg.badge.port = 80; });
+  });
+  updateConfig((cfg) => {
+    cfg.badge.host = '127.0.0.1';
+    cfg.badge.port = badge.server.address().port;
+    cfg.cardOwner = { 'stocks-aapl': 'stocks' };
+    cfg.feeds.stocks = { enabled: true, order: 0, settings: {} };
+  });
+
+  const stocks = fakePlugin({ id: 'stocks', cards: [] });
+  const runtime = new PluginRuntime([stocks]);
+  await runtime.reconcileOrphans();
+
+  assert.deepEqual(badge.received, []);
+});
+
+test('reconcileOrphans() leaves an id alone when it does not match any registered plugin\'s id prefix', async (t) => {
+  resetConfigCacheForTests();
+  await setBadgeToken('test-token-reconcile-4');
+  const badge = fakeBadgeServerWithCards([{ id: 'firmware-builtin-clock', title: 'not ours' }]);
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => badge.server.close(resolve));
+    updateConfig((cfg) => { cfg.badge.host = ''; cfg.badge.port = 80; });
+  });
+  updateConfig((cfg) => {
+    cfg.badge.host = '127.0.0.1';
+    cfg.badge.port = badge.server.address().port;
+  });
+
+  const runtime = new PluginRuntime([fakePlugin({ id: 'stocks', cards: [] })]);
+  await runtime.reconcileOrphans();
+
+  assert.deepEqual(badge.received, []);
+});
+
 test('reschedule only arms timers for enabled feeds, respecting minIntervalSeconds', async () => {
   resetConfigCacheForTests();
   const feed = fakePlugin({ id: 'scheduled-feed', cards: [] });

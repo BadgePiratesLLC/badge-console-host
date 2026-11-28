@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import sea from 'node:sea';
 import { loadConfig, saveConfig, updateConfig, getFeedConfig } from './config-store.mjs';
 import { setSecret, deleteSecret, hasSecret } from './credential-store.mjs';
-import { exchangePairCode, setBadgeToken, getOtaStatus, checkBadgeForUpdate, triggerBadgeUpdate } from './badge-client.mjs';
+import { exchangePairCode, setBadgeToken, getOtaStatus, checkBadgeForUpdate, triggerBadgeUpdate, getHaStatus } from './badge-client.mjs';
 import { browse as mdnsBrowse } from './mdns.mjs';
 import { PluginRuntime } from './plugin-runtime.mjs';
 import { start as startActionServer } from './action-server.mjs';
@@ -89,6 +89,27 @@ function serveStatic(req, res, pathname) {
   return true;
 }
 
+// Nexus 831d8e1a item 3: the host's own homeassistant plugin and the
+// badge's firmware-direct /ha-config list are two independent paths that
+// can watch the same HA entity with no warning between them — that's
+// where the Bookshelf x3 / office temp x2 duplicates traced back to (PR
+// #29's cleanup only dedupes within one source). Best-effort: a badge
+// that's unpaired, unreachable, or running firmware without /ha-status
+// just reports no overlap rather than failing the whole /api/state call.
+async function findHaOverlap(cfg) {
+  if (!cfg.badge.paired || !cfg.badge.host) return [];
+  const haFeed = getFeedConfig('homeassistant', { intervalSeconds: homeassistant.defaultIntervalSeconds });
+  const hostEntities = [haFeed.settings.stateEntityId, haFeed.settings.actionEntityId].filter(Boolean);
+  if (hostEntities.length === 0) return [];
+  try {
+    const status = await getHaStatus(cfg.badge.host, cfg.badge.port);
+    const firmwareEntities = new Set((status.entities || []).map((e) => e.id));
+    return hostEntities.filter((id) => firmwareEntities.has(id));
+  } catch {
+    return [];
+  }
+}
+
 async function handleApi(req, res, pathname) {
   // --- Plugins / feeds ---
   if (pathname === '/api/state' && req.method === 'GET') {
@@ -102,7 +123,8 @@ async function handleApi(req, res, pathname) {
       for (const cred of p.credentialsSchema) credState[cred.account] = await hasSecret(SERVICE, cred.account);
       withCreds.push({ ...p, config: feedCfg, status: status[p.id], credentials: credState });
     }
-    return sendJson(res, 200, { feeds: withCreds, badge: { host: cfg.badge.host, port: cfg.badge.port, paired: cfg.badge.paired }, version: VERSION });
+    const haOverlap = await findHaOverlap(cfg);
+    return sendJson(res, 200, { feeds: withCreds, badge: { host: cfg.badge.host, port: cfg.badge.port, paired: cfg.badge.paired }, version: VERSION, haOverlap });
   }
 
   // --- Self-update (Nexus b1ad1a04): check GitHub Releases for this app's
@@ -125,6 +147,7 @@ async function handleApi(req, res, pathname) {
     const plugin = PLUGINS.find((p) => p.id === feedId);
     if (!plugin) return sendJson(res, 404, { error: 'no such feed' });
     const body = await readJsonBody(req);
+    const wasEnabled = getFeedConfig(feedId, { intervalSeconds: plugin.defaultIntervalSeconds }).enabled;
     updateConfig((cfg) => {
       const feedCfg = getFeedConfig(feedId, { intervalSeconds: plugin.defaultIntervalSeconds });
       if (typeof body.enabled === 'boolean') feedCfg.enabled = body.enabled;
@@ -138,6 +161,12 @@ async function handleApi(req, res, pathname) {
       cfg.feeds[feedId] = feedCfg;
     });
     runtime.reschedule();
+    // Nexus 831d8e1a: disabling a feed stops its polling, which is the
+    // only thing that would otherwise notice and clean up its cards — so
+    // the disable itself has to be the thing that evicts them.
+    if (wasEnabled && body.enabled === false) {
+      await runtime.evictFeed(feedId);
+    }
     return sendJson(res, 200, { ok: true });
   }
 
@@ -266,6 +295,10 @@ const server = http.createServer(async (req, res) => {
 export function start(port = Number(process.env.BADGE_CONSOLE_HOST_PORT || 4173)) {
   return new Promise((resolve) => {
     server.listen(port, '127.0.0.1', async () => {
+      // Nexus 831d8e1a: before the scheduler's first tick, so a restart
+      // doesn't let a disabled-feed or pre-cardOwner orphan sit on the
+      // badge for a whole poll cycle (or forever, for a disabled feed).
+      await runtime.reconcileOrphans();
       runtime.start();
       actionServer = await startActionServer(runtime, ACTION_PORT);
       log.info(`badge-console-host: config page at http://127.0.0.1:${port}`);

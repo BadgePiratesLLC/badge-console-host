@@ -147,6 +147,48 @@ test('a wrong pairing code fails pairing cleanly and never stores a token', asyn
   assert.match(body.error, /rejected that code/);
 });
 
+// Nexus 831d8e1a item 2: disabling a feed through the real /api/feeds/:id
+// route a buyer's Feeds page actually calls has to evict that feed's
+// cards right then — nothing else will ever notice afterward, since a
+// disabled feed never polls again.
+test('disabling a feed evicts its cards from the badge via the real /api/feeds/:id route', async (t) => {
+  const badge = fakeBadge();
+  await new Promise((resolve) => badge.server.listen(0, '127.0.0.1', resolve));
+  const badgePort = badge.server.address().port;
+
+  const hostPort = 41734;
+  await start(hostPort);
+  t.after(async () => {
+    await stop();
+    await new Promise((resolve) => badge.server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${hostPort}`;
+
+  await fetch(`${base}/api/badge/pair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host: '127.0.0.1', port: badgePort, code: '654321' }),
+  });
+  await fetch(`${base}/api/feeds/openclaw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: true, intervalSeconds: 3600 }),
+  });
+  await fetch(`${base}/api/feeds/openclaw/test`, { method: 'POST' });
+  assert.ok(badge.received.some((r) => r.cards.some((c) => c.id === 'openclaw-activity')));
+
+  badge.received.length = 0;
+  const disableRes = await fetch(`${base}/api/feeds/openclaw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(disableRes.status, 200);
+
+  const removals = badge.received.flatMap((r) => r.cards).filter((c) => c.remove);
+  assert.ok(removals.some((c) => c.id === 'openclaw-activity'), `expected a remove push for openclaw-activity: ${JSON.stringify(badge.received)}`);
+});
+
 test('display order is a real, persisted per-feed setting — this is what the config page\'s up/down buttons drive', async (t) => {
   const hostPort = 41733;
   await start(hostPort);

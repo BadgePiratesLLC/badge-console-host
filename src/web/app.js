@@ -28,6 +28,7 @@ async function loadState() {
   const state = await api('/api/state');
   renderBadge(state.badge);
   renderFeeds(state.feeds);
+  renderHaOverlap(state.haOverlap || []);
   if (state.badge.paired) {
     loadOtaStatus();
   } else {
@@ -103,6 +104,21 @@ async function loadOtaStatus() {
     actionsEl.style.display = 'none';
     statusEl.textContent = '';
   }
+}
+
+// Nexus 831d8e1a item 3: warns rather than silently letting a duplicate
+// tile happen again — the homeassistant feed below and the badge's own
+// /ha-config list are two independent paths to the same card pool, and
+// nothing stops a buyer from pointing both at the same entity.
+function renderHaOverlap(overlap) {
+  const banner = document.getElementById('ha-overlap-banner');
+  if (overlap.length === 0) {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = '';
+  banner.className = 'status-line warn';
+  banner.textContent = `This feed's Home Assistant entity (${overlap.join(', ')}) is also in the badge's own /ha-config watch list — expect a duplicate card until one side stops watching it.`;
 }
 
 function renderFeeds(feeds) {
