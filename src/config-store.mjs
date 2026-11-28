@@ -9,6 +9,11 @@ import { HOME_DIR, CONFIG_PATH } from './paths.mjs';
 const DEFAULT_CONFIG = {
   badge: { host: '', port: 80, paired: false },
   feeds: {}, // feedId -> { enabled, intervalSeconds, order, settings }
+  // cardId -> pluginId, the last plugin to push that id. Persisted
+  // (Nexus 831d8e1a) so a host restart doesn't forget ownership and treat
+  // every id as having no owner — see plugin-runtime.mjs's constructor
+  // and _removeStaleIds().
+  cardOwner: {},
 };
 
 let cached = null;
